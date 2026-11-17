@@ -23,6 +23,8 @@ walk them with motion-captured gaits. Results are rendered as videos or saved as
 ## Demos
 All clips are rollouts from trained checkpoints (no scripted paths): every person picks its own next goal, plans a route
 and walks it; the motion-captured gait is time-scaled to the learned speed. Click a title for the full-length MP4.
+The [project demo](docs/media/demo.mp4) (94 s, captioned) strings these clips together with the top-down map,
+the self-improvement loop and the training results.
 
 | [Street crossing](docs/media/world_street.mp4) | [Back garden](docs/media/world_garden.mp4) |
 |:---:|:---:|
@@ -37,7 +39,8 @@ and walks it; the motion-captured gait is time-scaled to the learned speed. Clic
   <br><sub>Top-down map (<code>--camera top</code>): the house is cut open, the garden is to the north and the street to the south.</sub>
 </p>
 
-Re-create all of these from your own checkpoints with `scripts/make_demo_media.sh` (about 45 min on 2× RTX A2000).
+Re-create all of these, including the demo video, from your own checkpoints with `scripts/make_demo_media.sh`
+(about 45 min on 2× RTX A2000). To re-cut only the video from existing renders, run `scripts/make_demo_video.py`.
 
 There are two modes, each with its own spec and training config:
 
@@ -243,7 +246,7 @@ blender/   build_room.py, build_world.py, build_human.py, rocketbox.py, cars.py,
 worldsim/  room_spec, world_spec, layout, nav, traffic, sensors, env, gait, skeleton, policy, ppo, pbt, selfplay, distill, export
 tests/     test_room.py (room, PPO, PBT, export), test_world.py (routes, crossing, traffic, car hits, world export)
 scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), make_demo_video.py (demo.mp4), plot_training.py
-docs/media/  demo GIFs, MP4s, stills and training curves shown in this README
+docs/media/  demo.mp4 (project demo), demo GIFs, MP4s, stills and training curves shown in this README
 train.py   evaluate.py
 ```
 Not in git (see `.gitignore`): `tools/` (Blender), `.venv/`, `runs/` (checkpoints), `renders/`, and `assets/rocketbox/`.
