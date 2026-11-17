@@ -9,6 +9,9 @@
   <a href="docs/media/world_cutaway.mp4">Full video</a></sub>
 </p>
 
+<p align="center"><b>▶ <a href="docs/media/demo.mp4">Watch the 90-second project demo</a></b>
+  (the world, the training loop and the results, with captions)</p>
+
 Several digital humans share a 3D world built in Blender: a furnished house, its back garden,
 the front yard, and a street with moving cars, a zebra crossing and a bus stop. Their walking
 policies are trained in PyTorch with PPO across two GPUs. A *recursive self-improvement* loop
@@ -239,7 +242,7 @@ configs/   room.json (the room), world.json (house + garden + street), default.y
 blender/   build_room.py, build_world.py, build_human.py, rocketbox.py, cars.py, render_rollout.py, common.py
 worldsim/  room_spec, world_spec, layout, nav, traffic, sensors, env, gait, skeleton, policy, ppo, pbt, selfplay, distill, export
 tests/     test_room.py (room, PPO, PBT, export), test_world.py (routes, crossing, traffic, car hits, world export)
-scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), plot_training.py
+scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), make_demo_video.py (demo.mp4), plot_training.py
 docs/media/  demo GIFs, MP4s, stills and training curves shown in this README
 train.py   evaluate.py
 ```

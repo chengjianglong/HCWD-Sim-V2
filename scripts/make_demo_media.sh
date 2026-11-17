@@ -43,4 +43,7 @@ gif $TMP/room.mp4 $OUT/room.gif 2 8 480
 
 # --- training curves --------------------------------------------------------------------------
 $PY scripts/plot_training.py --log "runs/main.log:Room mode" --log "runs/world.log:World mode" --out $OUT/training.png
+
+# --- captioned demo video (uses the renders above and training.png) ---------------------------
+$PY scripts/make_demo_video.py --demo $TMP --room $TMP/room.mp4 --out $OUT/demo.mp4
 ls -lh $OUT
