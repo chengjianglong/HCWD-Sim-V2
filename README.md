@@ -174,11 +174,12 @@ the procedural visuals while the measured `room.json` stays the physics.
 
 Best population member per generation, on the fixed-seed evaluation (`scripts/plot_training.py`). Each step-up of
 "people" or "cars" is the curriculum moving to a harder stage, which is why goals/min drops at those points in room mode.
+The table shows the generation saved as `runs/<id>/best.pt` (the highest-scoring member over the whole run).
 
 | Mode (generation) | People | Cars | Success | Goals / min | Collision rate | Car-hit rate | Jaywalk rate |
 |---|---|---|---|---|---|---|---|
-| World (38) | 6 | 8 | 100% | 5.5 | 1.2% | 0.02% | 2.6% |
-| Room (39) | 6 | – | 96% | 9.4 | 4.7% | – | – |
+| World (76 of 80) | 6 | 8 | 99.9% | 5.8 | 0.7% | 0.01% | 2.3% |
+| Room (38 of 40) | 6 | – | 95% | 9.3 | 4.3% | – | – |
 
 Goals per minute are lower in the world because the goals are much farther apart (routes of 10–25 m through doors, the
 gate and the crossing, against 2–5 m inside the room).

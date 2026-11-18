@@ -1,6 +1,9 @@
-# Reference environment. The repo's .venv was created with:
-#   python -m venv --system-site-packages .venv   (from a Python 3.10 env with torch 2.6.0+cu124)
-#   .venv/bin/pip install pyyaml tensorboard pytest numpy
+# Reference environment. The repo's .venv is an isolated venv on top of it (no system or user site
+# packages, so nothing from ~/.local leaks in):
+#   conda env create -f environment.yml
+#   ~/anaconda3/envs/worldsim/bin/python -m venv .venv
+#   .venv/bin/pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+#   .venv/bin/pip install numpy pyyaml tensorboard pytest matplotlib pillow imageio-ffmpeg pyarrow
 name: worldsim
 channels: [pytorch, nvidia, conda-forge]
 dependencies:
@@ -12,3 +15,7 @@ dependencies:
       - pyyaml
       - tensorboard
       - pytest
+      - matplotlib        # scripts/plot_training.py
+      - pillow            # scripts/make_demo_video.py
+      - imageio-ffmpeg    # demo media and videos
+      - pyarrow           # LeRobot parquet export
