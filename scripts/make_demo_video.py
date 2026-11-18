@@ -2,11 +2,13 @@
 
     python scripts/make_demo_video.py [--out docs/media/demo.mp4]
 
-Inputs (made by scripts/make_demo_media.sh): renders/demo/{cutaway,street,garden,aerial}.mp4,
-renders/demo/top_f200.png, a room-mode render, and docs/media/training.png. Title cards, captions and the
-self-improvement diagram are drawn with PIL; ffmpeg (imageio-ffmpeg) does the editing.
+Inputs (made by scripts/make_demo_media.sh): renders/demo/{cutaway,house,kitchen,street,garden,aerial}.mp4,
+renders/demo/top_f420.png, a room-mode render, docs/media/training.png, and one or more raw egocentric episodes
+(--ego, from blender/gen_ego_episodes.py). Title cards, captions, the self-improvement diagram and the multi-view
+egocentric mosaic are drawn with PIL; ffmpeg (imageio-ffmpeg) does the editing.
 """
 import argparse
+import json
 import os
 import subprocess
 import tempfile
@@ -141,6 +143,44 @@ def chart_card(path, png):
     im.save(path)
 
 
+EGO_NAMES = {"head": "head (glasses)", "chest": "chest", "left_wrist": "left wrist", "right_wrist": "right wrist",
+             "scene_front": "scene front", "scene_left": "scene left", "scene_right": "scene right"}
+
+
+def ego_mosaic(ep_dir, out):
+    """One raw egocentric episode as a 1280x720 clip: the head view large, the other six views in a 3x2 grid."""
+    m = json.load(open(os.path.join(ep_dir, "episode.json")))
+    others = [v for v in m["views"] if v != "head"][:6]
+    big, small, gap, x0, y0 = 512, 200, 8, 64, 150
+    xs = x0 + big + 16
+    frames = tempfile.mkdtemp(prefix="ego_frames_")
+    t = m.get("task", {})
+    sub = f"{t.get('n_cuts', '?')} cuts at {t.get('chop_hz', 0):.1f} Hz · {t.get('apple_color', '')} apple · " \
+          f"{'in the whole house' if m.get('scene') == 'house' else 'standalone kitchen'}"
+    for i in range(m["n_frames"]):
+        im = Image.new("RGB", (W, H), NAVY)
+        d = ImageDraw.Draw(im)
+        d.text((x0, 36), "EGOCENTRIC KITCHEN · 7 SYNCHRONISED CAMERAS", font=MONO(20), fill=ORANGE)
+        d.text((x0, 66), f"\u201c{m['instruction']}\u201d", font=BOLD(34), fill=PAPER)
+        d.text((x0, 112), sub, font=REG(20), fill=MUTED)
+        tile = lambda v, r: Image.open(os.path.join(ep_dir, v, f"{i:06d}.png")).convert("RGB").resize((r, r), Image.LANCZOS)  # noqa: E731
+        im.paste(tile("head", big), (x0, y0 + 26))
+        d.text((x0, y0), EGO_NAMES["head"], font=MONO(18), fill=MUTED)
+        for k, v in enumerate(others):
+            x, y = xs + (k % 3) * (small + gap), y0 + (k // 3) * (small + 34)
+            d.text((x, y), EGO_NAMES.get(v, v), font=MONO(18), fill=MUTED)
+            im.paste(tile(v, small), (x, y + 26))
+        fr = m["frames"][i]
+        yb = y0 + 2 * (small + 34) + 6
+        d.text((xs, yb), f"t = {i / m['fps']:4.1f} s   phase: {fr['phase']}", font=MONO(20), fill=PAPER)
+        d.text((xs, yb + 32), "Logged per frame: both hands' 6-DoF pose, grip,", font=REG(19), fill=MUTED)
+        d.text((xs, yb + 56), "every camera's intrinsics and pose.", font=REG(19), fill=MUTED)
+        im.save(os.path.join(frames, f"{i:06d}.png"))
+    run(["-framerate", str(m["fps"]), "-i", os.path.join(frames, "%06d.png"), "-c:v", "libx264", "-crf", "16",
+         "-pix_fmt", "yuv420p", out])
+    return m["n_frames"] / m["fps"]
+
+
 # ----------------------------------------------------------------------------------------- editing
 def segment(out, src, dur, captions=(), start=0.0, still=False, zoom=False):
     """One normalised 1280x720/30fps segment with timed captions and fades from/to black."""
@@ -167,6 +207,7 @@ def main():
     ap.add_argument("--demo", default=os.path.join(ROOT, "renders", "demo"))
     ap.add_argument("--room", default=os.path.join(ROOT, "renders", "showcase", "rollout_corner.mp4"))
     ap.add_argument("--chart", default=os.path.join(ROOT, "docs", "media", "training.png"))
+    ap.add_argument("--ego", nargs="*", default=[], help="raw egocentric episode folders to show (episode_NNNNNN)")
     ap.add_argument("--out", default=os.path.join(ROOT, "docs", "media", "demo.mp4"))
     a = ap.parse_args()
     v = lambda n: os.path.join(a.demo, n)  # noqa: E731
@@ -174,23 +215,25 @@ def main():
     p = lambda n: os.path.join(tmp, n)  # noqa: E731
 
     cap_specs = {
-        "c1": ("Live rollout · trained policy", "Six digital humans share a house, a garden and a street with eight cars"),
+        "c1": ("Live rollout · trained policy", "Six digital humans share a house, a kitchen, a garden and a street with eight cars"),
         "c2": ("No scripted paths", "Each person picks a goal and plans a route through doors, the garden gate and the crossing"),
-        "c3": ("Traffic", "The driver sees the pedestrian on the zebra crossing and brakes"),
-        "c4": ("The world · configs/world.json", "A house on a 14 × 27.5 m lot: living room, fenced back garden, front yard, two-lane street"),
+        "c4": ("The world · configs/world.json", "A living room, a kitchen built onto it, a fenced back garden, a front yard and a two-lane street"),
+        "c11": ("The kitchen · configs/kitchen.json", "Built onto the house; an open door joins it to the living room"),
+        "c12": ("New goals", "Fridge, stove, chopping counter and island, so people walk between the two rooms"),
+        "c13": ("Inside the kitchen", "The same kitchen is the set for the egocentric chopping data"),
         "c5": ("Traffic model", "Cars follow each other (IDM) and stop for people in their lane"),
         "c6": ("Distracted drivers", "A quarter of drivers only notice people within 7 m, so people learn to look first"),
         "c7": ("Back garden", "Patio, BBQ, beds, bench and shed, reached through the back door or the side gate"),
         "c8": ("Navigation", "Routes come from a GPU navigation grid; road cells cost 4×, so people use the crossing"),
-        "c9": ("Results · world run, 6 people and 8 cars", "100% goal success; collisions down from 7.1% to 1.1% of steps; car hits 0.01%"),
+        "c9": ("Results · world run, 6 people and 8 cars", "99.9% goal success at 5.8 goals/min; collisions down from 7% to 0.7% of steps; car hits 0.01%"),
         "c10": ("Room mode · Cycles", "Photo-realistic Microsoft Rocketbox avatars with motion-captured gaits"),
     }
     for k, (label, text) in cap_specs.items():
         caption_png(p(k + ".png"), label, text)
 
-    bg = backdrop(v("cutaway.mp4"), 13)
+    bg = backdrop(v("cutaway.mp4"), 6)
     title_card(p("title.png"), bg, "Technical demo", "Human-Centric World Simulation",
-               "Digital humans that learn to share a house, a garden and a busy street",
+               "Digital humans that learn to share a house, a garden and a busy street, and first-person data for robots",
                "PPO + recursive self-improvement · PyTorch · Blender 4.2")
     title_card(p("end.png"), bg, "Open source on GitHub", "Human-Centric World Simulation",
                "github.com/chengjianglong/human-centric-world-simulation",
@@ -200,16 +243,28 @@ def main():
 
     segs = [
         (p("title.png"), 5, [], dict(still=True, zoom=True)),
-        (v("cutaway.mp4"), 20, [("c1", 0.5, 6.5), ("c2", 6.5, 12.5), ("c3", 12.5, 19.5)], {}),
-        (v("top_f200.png"), 7, [("c4", 0.8, 6.6)], dict(still=True, zoom=True)),
-        (v("street.mp4"), 12, [("c5", 0.5, 6.2), ("c6", 6.2, 11.6)], dict(start=8)),
-        (v("garden.mp4"), 9, [("c7", 0.5, 8.6)], dict(start=1)),
-        (v("aerial.mp4"), 10, [("c8", 0.5, 9.6)], dict(start=6)),
+        (v("cutaway.mp4"), 12, [("c1", 0.5, 6.0), ("c2", 6.0, 11.6)], dict(start=0.5)),
+        (v("top_f420.png"), 7, [("c4", 0.8, 6.6)], dict(still=True, zoom=True)),
+        (v("house.mp4"), 12, [("c11", 0.5, 6.0), ("c12", 6.0, 11.6)], dict(start=3)),
+        (v("kitchen.mp4"), 7, [("c13", 0.5, 6.6)], dict(start=9)),
+        (v("street.mp4"), 9, [("c5", 0.5, 4.6), ("c6", 4.6, 8.6)], dict(start=0.5)),
+        (v("garden.mp4"), 7, [("c7", 0.5, 6.6)], dict(start=0.3)),
+        (v("aerial.mp4"), 7, [("c8", 0.5, 6.6)], dict(start=0.3)),
         (p("loop.png"), 8, [], dict(still=True)),
         (p("chart.png"), 7, [("c9", 0.6, 6.6)], dict(still=True)),
-        (a.room, 10, [("c10", 0.5, 9.6)], dict(start=2)),
-        (p("end.png"), 6, [], dict(still=True, zoom=True)),
+        (a.room, 9, [("c10", 0.5, 8.6)], dict(start=2)),
     ]
+    if a.ego:
+        title_card(p("ego_title.png"), backdrop(v("kitchen.mp4"), 12), "Egocentric data for VLA training",
+                   "A woman chops an apple; a body-worn rig films it",
+                   "Head, chest and both wrists, plus three scene cameras. Exported to LeRobot v2 and vla-qwen.",
+                   "blender/gen_ego_episodes.py · --scene house")
+        segs.append((p("ego_title.png"), 5, [], dict(still=True, zoom=True)))
+        for j, ep in enumerate(a.ego):
+            clip = p(f"ego{j}.mp4")
+            dur = ego_mosaic(ep, clip)
+            segs.append((clip, round(dur, 1), [], {}))
+    segs.append((p("end.png"), 6, [], dict(still=True, zoom=True)))
     parts = []
     for i, (src, dur, caps, kw) in enumerate(segs):
         out = p(f"seg{i:02d}.mp4")

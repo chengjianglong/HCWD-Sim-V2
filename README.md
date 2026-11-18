@@ -2,37 +2,45 @@
 
 <p align="center">
   <img src="docs/media/world_cutaway.gif" width="760"
-       alt="Six photo-realistic digital humans moving through a cut-away house, its garden and a street with traffic">
+       alt="Six photo-realistic digital humans moving through a cut-away house with a kitchen, its garden and a street with traffic">
   <br>
-  <sub>Six learned walking policies share a house, a garden and a street with eight cars: they go through the doors and the
-  garden gate, cross at the zebra crossing, and the cars brake for them. Roof cut away; rendered in Blender (EEVEE).
+  <sub>Six learned walking policies share a house with a kitchen, a garden and a street with eight cars: they go through
+  the doors and the garden gate, cross at the zebra crossing, and the cars brake for them. Roof cut away; rendered in Blender (EEVEE).
   <a href="docs/media/world_cutaway.mp4">Full video</a></sub>
 </p>
 
-<p align="center"><b>▶ <a href="docs/media/demo.mp4">Watch the 90-second project demo</a></b>
-  (the world, the training loop and the results, with captions)</p>
+<p align="center">
+  <a href="docs/media/demo.mp4"><img src="docs/media/demo_thumb.jpg" width="560"
+     alt="Project demo video: the roof-off house with people walking from the living room into the kitchen"></a>
+  <br><b>▶ <a href="docs/media/demo.mp4">Watch the 2-minute project demo</a></b>
+  (the world and its kitchen, the training loop, the results and the egocentric camera data, with captions)</p>
 
-Several digital humans share a 3D world built in Blender: a furnished house, its back garden,
-the front yard, and a street with moving cars, a zebra crossing and a bus stop. Their walking
+Several digital humans share a 3D world built in Blender: a furnished house with a kitchen joined to the living
+room by an open door, its back garden, the front yard, and a street with moving cars, a zebra crossing and a bus stop. Their walking
 policies are trained in PyTorch with PPO across two GPUs. A *recursive self-improvement* loop
 improves them generation by generation: population-based training, self-play against elite past
 policies, distillation of the best policies into new students, and an automatic curriculum.
 The learned trajectories go back into Blender, where photo-realistic Microsoft Rocketbox avatars
 walk them with motion-captured gaits. Results are rendered as videos or saved as `.blend` and `.bvh` files.
+The same kitchen also produces first-person, multi-camera data of a woman chopping an apple, for training
+vision-language-action (VLA) models.
 
 ## Demos
 All clips are rollouts from trained checkpoints (no scripted paths): every person picks its own next goal, plans a route
 and walks it; the motion-captured gait is time-scaled to the learned speed. Click a title for the full-length MP4.
-The [project demo](docs/media/demo.mp4) (94 s, captioned) strings these clips together with the top-down map,
-the self-improvement loop and the training results.
+The [project demo](docs/media/demo.mp4) (about 2 min, captioned) strings these clips together with the top-down map,
+the self-improvement loop, the training results and two multi-view egocentric chopping episodes.
 
-| [Street crossing](docs/media/world_street.mp4) | [Back garden](docs/media/world_garden.mp4) |
+| [**Living room and kitchen**](docs/media/world_house.mp4) | [**Inside the kitchen**](docs/media/world_kitchen_inside.mp4) |
 |:---:|:---:|
+| <img src="docs/media/world_house.gif" width="400" alt="Roof-off view from the east: people walk from the living room through the open door into the kitchen"> | <img src="docs/media/world_kitchen_inside.gif" width="400" alt="Corner camera inside the kitchen: people come in through the door from the living room"> |
+| The kitchen is built onto the house; people walk through the open door to the fridge, the stove, the counter and the island. | A corner camera under the kitchen ceiling, facing the door to the living room. The same kitchen is the set for the egocentric data. |
+| [**Street crossing**](docs/media/world_street.mp4) | [**Back garden**](docs/media/world_garden.mp4) |
 | <img src="docs/media/world_street.gif" width="400" alt="People crossing the street at the zebra crossing while cars yield"> | <img src="docs/media/world_garden.gif" width="400" alt="People walking around the patio, beds and shed in the back garden"> |
 | People use the zebra crossing; attentive drivers brake and wait (IDM car-following with pedestrian yielding). | Patio, vegetable and flower beds, bench and shed; the side gate links the garden to the street. |
 | [**Aerial view**](docs/media/world_aerial.mp4) | [**Room mode** (Cycles)](docs/media/room_corner.mp4) |
 | <img src="docs/media/world_aerial.gif" width="400" alt="Aerial view of the whole lot and street with traffic"> | <img src="docs/media/room.gif" width="400" alt="Three Rocketbox avatars walking between furniture in the living room"> |
-| The whole lot: house, fenced garden, front yard, sidewalks, two-lane street and bus stop. | The original living-room task with photo-realistic Microsoft Rocketbox avatars, path-traced in Cycles. |
+| The whole lot: the house and its kitchen, fenced garden, front yard, sidewalks, two-lane street and bus stop. | The original living-room task with photo-realistic Microsoft Rocketbox avatars, path-traced in Cycles. |
 
 <p align="center">
   <img src="docs/media/world_top.jpg" width="760" alt="Top-down orthographic map of the world">
@@ -40,7 +48,7 @@ the self-improvement loop and the training results.
 </p>
 
 Re-create all of these, including the demo video, from your own checkpoints with `scripts/make_demo_media.sh`
-(about 45 min on 2× RTX A2000). To re-cut only the video from existing renders, run `scripts/make_demo_video.py`.
+(about an hour on 2× RTX A2000). To re-cut only the video from existing renders, run `scripts/make_demo_video.py`.
 
 There are two modes, each with its own spec and training config:
 
@@ -95,7 +103,8 @@ was trained with unless you pass `--spec`, `--agents` or `--cars`.
 
 **Render options**:
 - `--camera`:
-  - World: `cutaway` (default; roof off, house + garden + street), `aerial`, `street`, `garden`, `top`, `follow`.
+  - World: `cutaway` (default; roof off, house + garden + street), `aerial`, `street`, `garden`, `top`, `follow`,
+    `house` (roof off, from the east over the kitchen into the living room), `kitchen` (a corner camera inside the kitchen).
   - Room: `corner` (default), `top`, `follow`.
 - `--engine cycles|eevee`: Cycles is the default for Rocketbox humans; EEVEE is a fast preview.
 - `--res 1920x1080`, `--samples 32`, `--frames 300`, `--still 120` (one PNG frame).
@@ -106,8 +115,9 @@ Each render also saves an animated `.blend` next to the video, so you can open i
 ## Egocentric kitchen data for VLA training
 <p align="center">
   <img src="docs/media/ego_views.jpg" width="860" alt="Seven synchronized camera views of a woman chopping an apple: head, chest, both wrists and three scene cameras">
-  <br><sub>One episode, three moments, all seven cameras. Every frame comes with both hands' 6-DoF poses, the grip
-  state and every camera's intrinsics and pose. <a href="docs/media/ego_views.gif">Animated version</a></sub>
+  <br><sub>Two episodes rendered in the house (`--scene house`), three moments each, all seven cameras. Every frame comes with both hands' 6-DoF poses, the grip
+  state and every camera's intrinsics and pose. <a href="docs/media/ego_views.gif">Animated version</a> ·
+  all seven views as video in the <a href="docs/media/demo.mp4">project demo</a> (from 1:30)</sub>
 </p>
 
 A woman chops an apple on a cutting board in a procedurally built kitchen, and a body-worn camera rig films it:
@@ -188,9 +198,9 @@ The world wraps the room in its surroundings. Coordinates continue from the room
 is the living room's inside south-west corner, the street is to the south (−y), and the garden is to the north (+y).
 
 <p align="center">
-  <img src="docs/media/world_kitchen.jpg" width="640" alt="Cutaway of the house from the east: the kitchen in front, joined to the living room by an open door">
-  <br><sub>The house with its roof off, seen from the east. The kitchen is in front, and the open door at the back
-  of its west wall leads into the living room.</sub>
+  <img src="docs/media/world_kitchen.jpg" width="640" alt="The house from the east with its roof off: people in the kitchen in front, and the open door into the living room">
+  <br><sub>The house with its roof off, seen from the east, during a rollout. The kitchen is in front, and the open
+  door in its west wall leads into the living room.</sub>
 </p>
 
 - **House**: the room's walls become solid colliders. The **front door** (south) and the **patio door**
@@ -353,7 +363,7 @@ tests/     test_room.py (room, PPO, PBT, export), test_world.py (routes, crossin
            test_ego.py (kitchen spec, ego state/actions, LeRobot and vla-qwen exports)
 scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), make_demo_video.py (demo.mp4), plot_training.py,
            gen_ego_data.sh, ego_to_lerobot.py, ego_to_vlaqwen.py, ego_preview.py
-docs/media/  demo.mp4 (project demo), demo GIFs, MP4s, stills and training curves shown in this README
+docs/media/  demo.mp4 (project demo) and its thumbnail, demo GIFs, MP4s, stills and training curves shown in this README
 train.py   evaluate.py
 ```
 Not in git (see `.gitignore`): `tools/` (Blender), `.venv/`, `runs/` (checkpoints), `renders/`, `data/` (generated datasets), and `assets/rocketbox/`.

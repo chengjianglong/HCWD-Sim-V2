@@ -92,8 +92,9 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--room", help="scene .blend (default: assets/room.blend, or assets/world.blend for world rollouts)")
     ap.add_argument("--room-scan", help="optional .glb/.gltf/.obj scan of the real room to render instead of the procedural shell")
-    ap.add_argument("--camera", choices=["corner", "top", "follow", "aerial", "cutaway", "street", "garden"],
-                    help="default: corner (room) / cutaway (world)")
+    ap.add_argument("--camera", choices=["corner", "top", "follow", "aerial", "cutaway", "street", "garden", "house", "kitchen"],
+                    help="default: corner (room) / cutaway (world). World only: house = roof-off view from the east over "
+                         "the kitchen into the living room; kitchen = high corner camera inside the kitchen, facing the door")
     ap.add_argument("--engine", choices=["eevee", "cycles"], help="default: cycles for rocketbox, eevee for mannequin")
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--res", default="1280x720")
@@ -112,7 +113,7 @@ def main():
                 pass
     world = str(data.get("kind", "room")) == "world"
     a.camera = a.camera or ("cutaway" if world else "corner")
-    if not world and a.camera in ("aerial", "cutaway", "street", "garden"):
+    if not world and a.camera in ("aerial", "cutaway", "street", "garden", "house", "kitchen"):
         raise SystemExit(f"--camera {a.camera} needs a world rollout (evaluate.py on a configs/world.json checkpoint)")
     out = a.out or os.path.splitext(a.rollout)[0] + f"_{a.camera}.mp4"
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -193,6 +194,20 @@ def main():
             scene.camera = follow_camera(scene, data, 1, rigs[0], follow_bone, back=3.2, height=4.2)
         else:
             scene.camera = follow_camera(scene, data, 1, rigs[0], follow_bone)
+    elif a.camera in ("house", "kitchen"):
+        # house: elevated from the east, roof off, over the kitchen into the living room through the door.
+        # kitchen: a corner camera just under the kitchen ceiling, looking at the door to the living room.
+        if a.camera == "house":
+            open_roof()
+        loc, target, lens = (((13.0, 0.5, 10.5), (4.6, 2.5, 0.3), 20) if a.camera == "house"
+                             else ((8.6, 0.75, 2.45), (5.6, 3.4, 0.7), 13))
+        cd = bpy.data.cameras.new(f"cam_{a.camera}_view")
+        cd.lens, cd.clip_end = lens, 200
+        cam = bpy.data.objects.new(f"cam_{a.camera}_view", cd)
+        scene.collection.objects.link(cam)
+        cam.location = loc
+        C.look_at(cam, target)
+        scene.camera = cam
     else:
         if a.camera == "cutaway":
             open_roof()
