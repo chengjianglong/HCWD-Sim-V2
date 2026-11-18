@@ -48,8 +48,9 @@ the self-improvement loop, the training results and two multi-view egocentric ch
   <br><sub>Top-down map (<code>--camera top</code>): the house is cut open (living room on the left, kitchen on the right), the garden is to the north and the street to the south.</sub>
 </p>
 
-Re-create all of these, including the demo video, from your own checkpoints with `scripts/make_demo_media.sh`
-(about an hour on 2× RTX A2000). To re-cut only the video from existing renders, run `scripts/make_demo_video.py`.
+Re-create all of these, including the demo video, from your own checkpoints with `scripts/make_demo_media.sh`.
+It renders the photo-real scenes with Cycles; `DEVICE=cpu scripts/make_demo_media.sh` renders on the CPU instead
+(about 5 h on a 20-thread Xeon, ~8 GB RAM), e.g. while the GPUs are busy training. To re-cut only the video from existing renders, run `scripts/make_demo_video.py`.
 
 There are two modes, each with its own spec and training config:
 
@@ -112,7 +113,9 @@ was trained with unless you pass `--spec`, `--agents` or `--cars`.
   - World: `cutaway` (default; roof off, house + garden + street), `aerial`, `street`, `garden`, `top`, `follow`,
     `house` (roof off, from the east over the kitchen into the living room), `kitchen` (a corner camera inside the kitchen).
   - Room: `corner` (default), `top`, `follow`.
-- `--engine cycles|eevee`: Cycles is the default for Rocketbox humans; EEVEE is a fast preview.
+- `--engine cycles|eevee`: Cycles is the default for Rocketbox humans; EEVEE is a fast preview (procedural scenes;
+  the photo-real world needs more than a 6 GB GPU in EEVEE).
+- `--device gpu|cpu`: where Cycles renders (CPU fits the photo-real world in ~8 GB RAM when the GPUs are busy).
 - `--res 1920x1080`, `--samples 32`, `--frames 300`, `--still 120` (one PNG frame).
 - `--humans rocketbox|mannequin` and `--avatars Female_Adult_01 Male_Adult_05 ...`: Rocketbox is used if it has been downloaded.
 - `--realism auto|photo|procedural`: which scene build to render (default: the photo-real one when it exists).
@@ -194,7 +197,7 @@ Options for `gen_ego_episodes.py`:
 - `--scene kitchen|house`: the standalone kitchen (`assets/kitchen.blend`), or the kitchen inside the whole house
   (`assets/world.blend`). For `house`, the house is moved so the kitchen's corner is the origin, so poses and
   actions are in the same frame in both scenes.
-- `--res 256` (square), `--fps 10`, `--engine eevee|cycles`, `--samples 8`, `--fisheye` (Cycles).
+- `--res 256` (square), `--fps 10`, `--engine eevee|cycles`, `--device gpu|cpu` (Cycles), `--samples 8`, `--fisheye` (Cycles).
 - `--views ...` renders a subset of the cameras.
 - `--no-render` writes the poses only, and `--keep-blend` saves the animated scene.
 

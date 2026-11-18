@@ -1,7 +1,7 @@
 """Animate the learned trajectories in the Blender room and render a video.
 
     tools/blender/blender -b -P blender/render_rollout.py -- --rollout renders/rollout.npz \
-        [--out renders/rollout.mp4] [--camera corner|top|follow|aerial|cutaway|street|garden] [--engine eevee|cycles] \
+        [--out renders/rollout.mp4] [--camera corner|top|follow|aerial|cutaway|street|garden] [--engine eevee|cycles] [--device gpu|cpu] \
         [--frames 300] [--res 1280x720] [--samples 32] [--still 120] [--room-scan scan.glb]
         [--humans rocketbox|mannequin] [--avatars Male_Adult_01 Female_Adult_04 ...]
 
@@ -26,8 +26,14 @@ import common as C  # noqa: E402
 from build_human import bake_motion, make_human  # noqa: E402
 
 
-def setup_gpu_cycles(scene, samples):
+def setup_gpu_cycles(scene, samples, device="gpu"):
     scene.render.engine = "CYCLES"
+    scene.cycles.samples = samples
+    scene.cycles.use_denoising = True
+    scene.render.use_persistent_data = True  # keep the static scene (BVH, textures) between animation frames
+    if device == "cpu":  # e.g. when the GPUs are busy: Cycles shares instanced geometry, so big scenes fit in RAM
+        scene.cycles.device = "CPU"
+        return
     prefs = bpy.context.preferences.addons["cycles"].preferences
     for t in ("OPTIX", "CUDA"):
         try:
@@ -40,8 +46,6 @@ def setup_gpu_cycles(scene, samples):
     for d in prefs.devices:
         d.use = d.type != "CPU"
     scene.cycles.device = "GPU"
-    scene.cycles.samples = samples
-    scene.cycles.use_denoising = True
 
 
 def goal_markers(data, col, start):
@@ -96,6 +100,7 @@ def main():
                     help="default: corner (room) / cutaway (world). World only: house = roof-off view from the east over "
                          "the kitchen into the living room; kitchen = high corner camera inside the kitchen, facing the door")
     ap.add_argument("--engine", choices=["eevee", "cycles"], help="default: cycles for rocketbox, eevee for mannequin")
+    ap.add_argument("--device", choices=["gpu", "cpu"], default="gpu", help="Cycles device (default: gpu)")
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--res", default="1280x720")
     ap.add_argument("--frames", type=int, help="max frames to render")
@@ -220,7 +225,7 @@ def main():
     scene.frame_start, scene.frame_end = 1, T
     scene.view_settings.view_transform = "AgX"
     if a.engine == "cycles":
-        setup_gpu_cycles(scene, a.samples)
+        setup_gpu_cycles(scene, a.samples, a.device)
     else:
         scene.render.engine = "BLENDER_EEVEE_NEXT"
         scene.eevee.taa_render_samples = a.samples

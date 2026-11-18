@@ -2,6 +2,8 @@
 # Re-create the README demo media in docs/media from trained checkpoints.
 #   scripts/make_demo_media.sh [world_ckpt] [room_ckpt]
 # Needs: tools/blender, Rocketbox avatars, `pip install imageio-ffmpeg matplotlib` in .venv.
+# Renders with Cycles (the photo-real scenes are too big for EEVEE on a 6 GB GPU). DEVICE=cpu renders on the CPU,
+# e.g. while the GPUs are busy training (about 5 h on a 20-thread Xeon; needs ~8 GB RAM).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 WORLD_CKPT=${1:-runs/world/best.pt}
@@ -11,6 +13,8 @@ BL=tools/blender/blender
 FF=$($PY -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
 OUT=docs/media
 TMP=renders/demo
+DEVICE=${DEVICE:-gpu}
+CY="--engine cycles --device $DEVICE"
 mkdir -p "$OUT" "$TMP"
 
 gif() {  # gif <video> <out.gif> <start s> <length s> <width>
@@ -31,12 +35,12 @@ d = dict(np.load('$TMP/world.npz', allow_pickle=True)); T = d['pos'].shape[0]
 np.savez_compressed('$TMP/world_late.npz', **{k: v[180:] if getattr(v, 'ndim', 0) and v.shape[0] == T else v for k, v in d.items()})"
 for spec in "house world_late 400" "kitchen world_late 400" "cutaway world 260" "street world 200" "garden world 150" "aerial world 150"; do
   set -- $spec
-  $BL -b -P blender/render_rollout.py -- --rollout $TMP/$2.npz --camera $1 --engine eevee --samples 8 --res 960x540 \
+  $BL -b -P blender/render_rollout.py -- --rollout $TMP/$2.npz --camera $1 $CY --samples 16 --res 960x540 \
     --frames $3 --out $TMP/$1.mp4
 done
 for cam in cutaway house street aerial garden; do mp4 $TMP/$cam.mp4 $OUT/world_$cam.mp4; done
 mp4 $TMP/kitchen.mp4 $OUT/world_kitchen_inside.mp4
-$BL -b -P blender/render_rollout.py -- --rollout $TMP/world.npz --camera top --engine eevee --res 1280x720 --still 420 --out $TMP/top.mp4
+$BL -b -P blender/render_rollout.py -- --rollout $TMP/world.npz --camera top $CY --samples 16 --res 1280x720 --still 420 --out $TMP/top.mp4
 "$FF" -v error -y -i $TMP/top_f420.png -q:v 3 $OUT/world_top.jpg
 "$FF" -v error -y -ss 12 -i $TMP/house.mp4 -frames:v 1 -q:v 3 $OUT/world_kitchen.jpg
 # hero GIF: 5 s of the whole lot, then a crossfade to the roof-off house view with people in the kitchen
@@ -51,7 +55,7 @@ gif $TMP/aerial.mp4  $OUT/world_aerial.gif 0.3 7 480
 
 # --- room: Rocketbox avatars, Cycles ----------------------------------------------------------
 $PY evaluate.py --ckpt "$ROOM_CKPT" --steps 300 --out $TMP/room.npz
-$BL -b -P blender/render_rollout.py -- --rollout $TMP/room.npz --camera corner --engine cycles --out $TMP/room.mp4
+$BL -b -P blender/render_rollout.py -- --rollout $TMP/room.npz --camera corner $CY --samples 16 --out $TMP/room.mp4
 mp4 $TMP/room.mp4 $OUT/room_corner.mp4
 gif $TMP/room.mp4 $OUT/room.gif 2 8 480
 
@@ -61,7 +65,7 @@ $PY scripts/plot_training.py --log "runs/main.log:Room mode" --log "runs/world.l
 # --- egocentric episodes for the video (house scene, two of them) -----------------------------
 for ep in 3 12; do
   [ -f $TMP/ego/episode_$(printf %06d $ep)/episode.json ] || $BL -b -P blender/gen_ego_episodes.py -- --scene house \
-    --out $TMP/ego --start $ep --episodes 1 --res 384
+    --out $TMP/ego --start $ep --episodes 1 --res 384 $CY
 done
 
 # --- captioned demo video (uses the renders above and training.png) ---------------------------

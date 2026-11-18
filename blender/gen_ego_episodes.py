@@ -1,7 +1,7 @@
 """Generate randomised egocentric chopping episodes (multi-view images + hand poses).
 
     tools/blender/blender -b -P blender/gen_ego_episodes.py -- --out data/ego_raw --episodes 20 --seed 0
-        [--start 0] [--engine eevee|cycles] [--res 256] [--fps 10] [--samples 8] [--fisheye] [--views head ...]
+        [--start 0] [--engine eevee|cycles] [--res 256] [--fps 10] [--samples 8] [--device gpu|cpu] [--fisheye] [--views head ...]
         [--scene kitchen|house]
 
 --scene kitchen (default) uses the standalone kitchen, assets/kitchen.blend (blender/build_kitchen.py). --scene house
@@ -140,7 +140,7 @@ def setup_render(sc, a, views):
     sc.view_settings.exposure = -0.5
     if a.engine == "cycles":
         import render_rollout as RR
-        RR.setup_gpu_cycles(sc, a.samples)
+        RR.setup_gpu_cycles(sc, a.samples, a.device)
         sc.cycles.use_adaptive_sampling = True
         sc.cycles.adaptive_threshold = 0.02
         sc.cycles.max_bounces, sc.cycles.diffuse_bounces, sc.cycles.glossy_bounces = 6, 3, 3
@@ -298,6 +298,7 @@ def main():
     ap.add_argument("--res", type=int, default=256)
     ap.add_argument("--fps", type=int, default=10, choices=[5, 10, 15, 30])
     ap.add_argument("--samples", type=int, default=8)
+    ap.add_argument("--device", choices=["gpu", "cpu"], default="gpu", help="Cycles device (default: gpu)")
     ap.add_argument("--fisheye", action="store_true", help="equisolid fisheye head camera (Cycles only)")
     ap.add_argument("--views", nargs="*", choices=ego_rig.VIEWS)
     ap.add_argument("--avatar", help="force one Rocketbox avatar")
