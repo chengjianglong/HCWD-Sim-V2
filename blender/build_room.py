@@ -24,6 +24,9 @@ def wall_segments(spec, wall):
     W, D, H, t = spec["width"], spec["depth"], spec["height"], spec["wall_thickness"]
     horiz = wall in ("south", "north")
     u_lo, u_hi = (-t, W + t) if horiz else (0.0, D)
+    if horiz:  # the south/north walls cover the corners, except at a wall shared with a neighbouring room
+        skip = spec.get("_skip_walls", ())
+        u_lo, u_hi = (0.0 if "west" in skip else u_lo), (W if "east" in skip else u_hi)
     ops = sorted((o for o in spec.get("openings", []) if o["wall"] == wall), key=lambda o: o["offset"])
     u = u_lo
     for o in ops:
@@ -58,8 +61,11 @@ def wall_box(spec, wall, u0, u1, z0, z1, inset=0.0, thick=None):
     return (W - n, um, zm), (th, du, dz)
 
 
-def build_walls(spec, col, mats):
+def build_walls(spec, col, mats, skip=()):
+    """`skip`: walls left out (one shared with a neighbouring room, which draws it)."""
     for wall in ("south", "north", "west", "east"):
+        if wall in skip:
+            continue
         for i, (u0, u1, z0, z1) in enumerate(wall_segments(spec, wall)):
             c, s = wall_box(spec, wall, u0, u1, z0, z1)
             C.box(f"wall_{wall}_{i}", c, s, mats["walls"], collection=col)

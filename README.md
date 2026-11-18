@@ -36,7 +36,7 @@ the self-improvement loop and the training results.
 
 <p align="center">
   <img src="docs/media/world_top.jpg" width="760" alt="Top-down orthographic map of the world">
-  <br><sub>Top-down map (<code>--camera top</code>): the house is cut open, the garden is to the north and the street to the south.</sub>
+  <br><sub>Top-down map (<code>--camera top</code>): the house is cut open (living room on the left, kitchen on the right), the garden is to the north and the street to the south.</sub>
 </p>
 
 Re-create all of these, including the demo video, from your own checkpoints with `scripts/make_demo_media.sh`
@@ -75,7 +75,7 @@ tools/blender/blender -b -P blender/build_world.py         # assets/world.blend,
 tools/blender/blender -b -P blender/build_room.py          # assets/room.blend, room.glb, room_layout.json
 tools/blender/blender -b -P blender/build_human.py         # assets/human.blend (simple mannequin rig, optional)
 
-.venv/bin/python -m pytest -q tests                       # 24 tests (room + world + ego)
+.venv/bin/python -m pytest -q tests                       # 27 tests (room + world + ego)
 
 # World: house + garden + street with traffic
 .venv/bin/python train.py --config configs/world.yaml --smoke --generations 2   # ~1 min check on both GPUs
@@ -112,8 +112,10 @@ Each render also saves an animated `.blend` next to the video, so you can open i
 
 A woman chops an apple on a cutting board in a procedurally built kitchen, and a body-worn camera rig films it:
 
-- **Scene** (`configs/kitchen.json`, `blender/build_kitchen.py`): L-shaped counters with a sink under the window,
-  a stove and hood, fridge, wall cabinets, an island with stools, and small props. It uses the same schema as `room.json`.
+- **Scene** (`configs/kitchen.json`, `blender/build_kitchen.py`): counters along two walls with a sink under the
+  window, a stove and hood, a fridge, wall cabinets, an island with stools, and small props. It uses the same schema
+  as `room.json`. The west wall has an open door to the living room. In the world (below) the kitchen is built onto
+  the house, and `--scene house` renders the episodes there, with the living room visible through the doorway.
 - **The cook** (`blender/chop.py`):
   - A Rocketbox woman, with her body from the `f_work_table` mocap clip. Rocketbox has no cutting mocap, so her arms are procedural.
   - An analytic two-bone IK, solved on top of the mocap, moves each wrist to a target and orients the hand. It is
@@ -154,6 +156,8 @@ tools/blender/blender -b -P blender/build_kitchen.py                         # a
 scripts/gen_ego_data.sh 200 2           # 200 episodes on 2 parallel jobs, then both exports (resumable)
 # or step by step:
 tools/blender/blender -b -P blender/gen_ego_episodes.py -- --out data/ego_raw --episodes 10 --start 0 --seed 0
+tools/blender/blender -b -P blender/gen_ego_episodes.py -- --scene house --out data/ego_house --episodes 10  # in the whole house
+SCENE=house RAW=data/ego_house scripts/gen_ego_data.sh 200 1    # the same, batched
 .venv/bin/python scripts/ego_to_lerobot.py --raw data/ego_raw --out data/ego_lerobot        # LeRobot v2.0, all views
 .venv/bin/python scripts/ego_to_vlaqwen.py --raw data/ego_raw --out data/ego_vlaqwen --views head right_wrist
 .venv/bin/python scripts/ego_preview.py --raw data/ego_raw --episodes 0 1 --sheet preview.jpg --gif preview.gif
@@ -170,6 +174,9 @@ tools/blender/blender -b -P blender/gen_ego_episodes.py -- --out data/ego_raw --
   `train.py --data`. Any two views can be chosen with `--views`.
 
 Options for `gen_ego_episodes.py`:
+- `--scene kitchen|house`: the standalone kitchen (`assets/kitchen.blend`), or the kitchen inside the whole house
+  (`assets/world.blend`). For `house`, the house is moved so the kitchen's corner is the origin, so poses and
+  actions are in the same frame in both scenes.
 - `--res 256` (square), `--fps 10`, `--engine eevee|cycles`, `--samples 8`, `--fisheye` (Cycles).
 - `--views ...` renders a subset of the cameras.
 - `--no-render` writes the poses only, and `--keep-blend` saves the animated scene.
@@ -180,12 +187,21 @@ Each episode records the maximum wrist-to-target error of its IK; over a 20-epis
 The world wraps the room in its surroundings. Coordinates continue from the room's: the origin
 is the living room's inside south-west corner, the street is to the south (−y), and the garden is to the north (+y).
 
+<p align="center">
+  <img src="docs/media/world_kitchen.jpg" width="640" alt="Cutaway of the house from the east: the kitchen in front, joined to the living room by an open door">
+  <br><sub>The house with its roof off, seen from the east. The kitchen is in front, and the open door at the back
+  of its west wall leads into the living room.</sub>
+</p>
+
 - **House**: the room's walls become solid colliders. The **front door** (south) and the **patio door**
   (north) are the only ways through, and both are drawn swung open, with their leaves as colliders.
   Outside, the house has siding, a gable roof, and a porch canopy with a light.
+- **Kitchen** (`configs/kitchen.json`, the same one the egocentric data uses): built onto the east side of the
+  house, with its own lower roof. An **open door** in the shared wall joins it to the living room. The fridge,
+  the stove, the chopping counter and the island are goals, so people walk between the two rooms.
 - **Back garden**: patio with table and umbrella, barbecue, vegetable and flower beds, two trees, a bench
   and a shed, all fenced. A **garden gate** with an arbour on the west side leads round to the front.
-  The east side yard is a dead end with the bins.
+  The kitchen fills the east side of the house, and the bins stand in front of it.
 - **Front**: path, porch step, shrubs, mailbox, a tree, and the sidewalk with street lamps.
 - **Street**: two 3.5 m lanes with centre and edge markings, a zebra crossing in front of the house with
   tactile paving, and the far sidewalk with a **bus stop**. Neighbouring houses and street trees form the backdrop.
@@ -194,7 +210,7 @@ is the living room's inside south-west corner, the street is to the south (−y)
     Intelligent Driver Model and brake for people in or next to their lane ahead.
   - Braking is capped at 8 m/s², and a quarter of drivers are *distracted*: they only notice people
     within 7 m. Stepping out in front of a car is genuinely dangerous.
-- **Goals**: 24 named places across the house, garden, yard and street (sofa, bookshelf, back door, patio table,
+- **Goals**: 29 named places across the house, kitchen, garden, yard and street (sofa, bookshelf, fridge, back door, patio table,
   garden bench, shed, bins, mailbox, bus stop, ...), or random reachable spots off the road.
 
 **What the humans get in the world:**
@@ -213,7 +229,7 @@ is the living room's inside south-west corner, the street is to the south (−y)
   - Walking on the road outside the crossing (jaywalking) costs −0.05 per step.
 
 ## Make it *your* place
-Everything comes from the two JSON files. The physics the agents learn in and the Blender visuals
+Everything comes from the JSON files. The physics the agents learn in and the Blender visuals
 are both generated from them by the same code, so they always match.
 
 **The room: `configs/room.json`**. Measure your room and edit:
@@ -231,6 +247,10 @@ are both generated from them by the same code, so they always match.
 
 **The surroundings: `configs/world.json`**:
 - `bounds`: the walkable rectangle around the house.
+- `annexes`: more rooms built onto the house, each with its own room-schema JSON, the `origin` of its south-west
+  interior corner, the `shared_wall` that touches the house, and the `door` in that wall. The house's facing wall
+  takes the door and loses any window there, and the shared wall is drawn and collided only once.
+  `room.json` itself is unchanged, so room mode still trains in the living room alone.
 - `objects`: garden and street furniture, using the same schema as room furniture. Types are patio, patio_table,
   bbq, tree (with `canopy` radius), shrub, garden_bed (with `flowers`), bench, shed, bins, mailbox, street_lamp,
   bus_stop, path, step and generic. Set `collide: false` for things you walk over.
@@ -257,6 +277,11 @@ The table shows the generation saved as `runs/<id>/best.pt` (the highest-scoring
 |---|---|---|---|---|---|---|---|
 | World (76 of 80) | 6 | 8 | 99.9% | 5.8 | 0.7% | 0.01% | 2.3% |
 | Room (38 of 40) | 6 | – | 95% | 9.3 | 4.3% | – | – |
+
+The world numbers were measured before the kitchen was added. On the world with the kitchen, the same checkpoint
+(6 people, 8 cars, 64 worlds) still reaches 99.6% of its goals at 5.6 goals/min, with 0.02% car hits and 1.9% jaywalking,
+but its collision rate rises from 0.8% to 2.7% in the same benchmark run. It never saw the doorway or the kitchen
+furniture in training. Resuming training on the new world (`train.py --resume runs/world`) should bring that back down.
 
 Goals per minute are lower in the world because the goals are much farther apart (routes of 10–25 m through doors, the
 gate and the crossing, against 2–5 m inside the room).
@@ -319,7 +344,7 @@ spinning wheels), keyed from the rollout's car trajectories.
 
 ## Layout
 ```
-configs/   room.json (the room), world.json (house + garden + street), kitchen.json (ego kitchen), default.yaml (room training), world.yaml (world training)
+configs/   room.json (the room), world.json (house + garden + street), kitchen.json (the kitchen: ego scene and the house annex), default.yaml (room training), world.yaml (world training)
 blender/   build_room.py, build_world.py, build_kitchen.py, build_human.py, rocketbox.py, cars.py, render_rollout.py, common.py
            chop.py (chopping task + arm IK), ego_rig.py (camera rig), gen_ego_episodes.py (ego data generator)
 worldsim/  room_spec, world_spec, layout, nav, traffic, sensors, env, gait, skeleton, policy, ppo, pbt, selfplay, distill, export,

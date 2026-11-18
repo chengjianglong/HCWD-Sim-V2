@@ -69,11 +69,14 @@ def door_leaf(spec, o):
                 hinge_u=u, inward=o["open"] == "in")
 
 
-def wall_colliders(spec):
-    """The room's walls as solid boxes at walking height (door openings are gaps; windows are solid)."""
+def wall_colliders(spec, skip=()):
+    """The room's walls as solid boxes at walking height (door openings are gaps; windows are solid).
+    `skip`: walls not to emit (a wall shared with a neighbouring room is emitted by that room)."""
     W, D, t = spec["width"], spec["depth"], spec["wall_thickness"]
     out = []
     for wall in ("south", "north", "west", "east"):
+        if wall in skip:
+            continue
         horiz = wall in ("south", "north")
         lo, hi = (-t, W + t) if horiz else (0.0, D)
         cuts = sorted((o["offset"], o["offset"] + o["width"]) for o in spec.get("openings", [])
@@ -92,7 +95,7 @@ def colliders(spec):
     """Oriented 2D boxes: dict(name, cx, cy, hx, hy, theta[rad], height)."""
     out = [leaf for leaf in (door_leaf(spec, o) for o in spec.get("openings", [])) if leaf]
     for f in spec.get("furniture", []):
-        if not f.get("collide", True):
+        if not f.get("collide", True) or f.get("z0", 0.0) > 1.0:  # rugs; wall cabinets and hoods above head height
             continue
         out.append(dict(name=f["name"], cx=f["center"][0], cy=f["center"][1],
                         hx=f["size"][0] / 2, hy=f["size"][1] / 2,

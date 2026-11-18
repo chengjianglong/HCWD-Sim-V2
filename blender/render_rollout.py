@@ -103,7 +103,13 @@ def main():
     ap.add_argument("--humans", choices=["rocketbox", "mannequin"])
     ap.add_argument("--avatars", nargs="*", help="Rocketbox avatar names (default: all downloaded, in order)")
     a = ap.parse_args(C.script_args())
-    data = dict(np.load(a.rollout, allow_pickle=True))
+    data = {}
+    with np.load(a.rollout, allow_pickle=True) as npz:
+        for k in npz.files:
+            try:
+                data[k] = npz[k]
+            except (ImportError, ValueError):  # pickled event lists from a newer numpy; not needed for rendering
+                pass
     world = str(data.get("kind", "room")) == "world"
     a.camera = a.camera or ("cutaway" if world else "corner")
     if not world and a.camera in ("aerial", "cutaway", "street", "garden"):
@@ -167,8 +173,9 @@ def main():
     res_x, res_y = (int(v) for v in a.res.lower().split("x"))
     scene.render.resolution_x, scene.render.resolution_y = res_x, res_y
     def open_roof():
-        for name in ("ceiling", "ceiling_fixture"):
-            bpy.data.objects[name].hide_render = True
+        for o in bpy.data.objects:  # the living room's, and any annex's (kitchen_ceiling, ...)
+            if o.name.split(".")[0].endswith(("ceiling", "ceiling_fixture")):
+                o.hide_render = True
         if "roof" in bpy.data.collections:
             bpy.data.collections["roof"].hide_render = True
 

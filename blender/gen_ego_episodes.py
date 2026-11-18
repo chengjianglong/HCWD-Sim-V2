@@ -1,9 +1,13 @@
 """Generate randomised egocentric chopping episodes (multi-view images + hand poses).
 
     tools/blender/blender -b -P blender/gen_ego_episodes.py -- --out data/ego_raw --episodes 20 --seed 0
-        [--start 0] [--engine eevee|cycles] [--res 256] [--fps 10] [--samples 16] [--fisheye] [--views head ...]
+        [--start 0] [--engine eevee|cycles] [--res 256] [--fps 10] [--samples 8] [--fisheye] [--views head ...]
+        [--scene kitchen|house]
 
-Each episode re-opens assets/kitchen.blend (run blender/build_kitchen.py first), randomises the scene, the
+--scene kitchen (default) uses the standalone kitchen, assets/kitchen.blend (blender/build_kitchen.py). --scene house
+uses the integrated house, assets/world.blend (blender/build_world.py), where the same kitchen is joined to the living
+room through an open door: the whole house is moved so the kitchen's corner is the origin, so poses and actions are in
+the same frame for both scenes. Each episode re-opens the blend, randomises the scene, the
 cook and the task, animates the chopping (chop.py), keys the camera rig (ego_rig.py) and renders every view
 in one multi-view pass. Output per episode:
 
@@ -69,7 +73,7 @@ def randomise_scene(rng):
         sun.data.energy = rng.uniform(1.5, 4.5)
         k = rng.uniform(0, 1)
         sun.data.color = (1.0, 0.92 + 0.08 * k, 0.82 + 0.18 * k)
-    light = bpy.data.objects.get("ceiling_light")
+    light = bpy.data.objects.get("kitchen_light") or bpy.data.objects.get("ceiling_light")
     if light:
         light.data.energy = rng.uniform(80, 240)
         k = rng.uniform(0, 1)
@@ -114,9 +118,29 @@ def hand_pose(arm, side):
     return dict(pos=list(arm.matrix_world @ pb.head), quat_wxyz=list(q))
 
 
+def house_origin(spec):
+    """Where the kitchen's south-west interior corner sits in the house (assets/world_layout.json)."""
+    with open(os.path.join(C.ASSETS, "world_layout.json")) as f:
+        lay = json.load(f)
+    an = next((an for an in lay.get("annexes", []) if an["name"] == spec["name"]), None)
+    if an is None:
+        sys.exit(f"assets/world_layout.json has no {spec['name']!r} annex: rebuild with blender/build_world.py")
+    return an["origin"]
+
+
+def shift_scene(origin):
+    """Move the whole scene by -origin so the kitchen's own frame is the world frame."""
+    for o in bpy.data.objects:
+        if o.parent is None:
+            o.location.x -= origin[0]
+            o.location.y -= origin[1]
+
+
 def run_episode(idx, a, spec, out_root):
     rng = np.random.default_rng([a.seed, idx])
     bpy.ops.wm.open_mainfile(filepath=a.blend)
+    if a.scene == "house":
+        shift_scene(a.origin)
     RB._CLIPS.clear()
     RB._REST.clear()
     sc = bpy.context.scene
@@ -190,6 +214,7 @@ def run_episode(idx, a, spec, out_root):
         task=dict(apple_color=color, n_cuts=ep.n_cuts, pieces=ep.n_cuts + 1, chop_hz=ep.hz, apple_radius=ep.radius,
                   distractors=distract, avatar=ep.avatar, cook_x=ep.cook_x, clip_start=ep.clip_start),
         render=dict(engine=a.engine, res=a.res, samples=a.samples, seconds=round(t_render, 1)),
+        scene=a.scene, scene_origin=list(a.origin),
         frames=frames,
     )
     with open(os.path.join(ep_dir, "episode.json"), "w") as f:
@@ -202,7 +227,9 @@ def run_episode(idx, a, spec, out_root):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", default=os.path.join(C.ROOT, "configs", "kitchen.json"))
-    ap.add_argument("--blend", default=os.path.join(C.ASSETS, "kitchen.blend"))
+    ap.add_argument("--scene", choices=["kitchen", "house"], default="kitchen",
+                    help="standalone kitchen, or the kitchen joined to the living room in the whole house")
+    ap.add_argument("--blend", help="default: assets/kitchen.blend or assets/world.blend for --scene house")
     ap.add_argument("--out", default=os.path.join(C.ROOT, "data", "ego_raw"))
     ap.add_argument("--episodes", type=int, default=1)
     ap.add_argument("--start", type=int, default=0, help="index of the first episode (for splitting across GPUs)")
@@ -220,9 +247,12 @@ def main():
     a = ap.parse_args(C.script_args())
     if a.fisheye and a.engine != "cycles":
         ap.error("--fisheye needs --engine cycles")
+    a.blend = a.blend or os.path.join(C.ASSETS, "world.blend" if a.scene == "house" else "kitchen.blend")
     if not os.path.exists(a.blend):
-        sys.exit(f"{a.blend} missing: run tools/blender/blender -b -P blender/build_kitchen.py")
+        builder = "build_world.py" if a.scene == "house" else "build_kitchen.py"
+        sys.exit(f"{a.blend} missing: run tools/blender/blender -b -P blender/{builder}")
     spec = room_spec.load_spec(a.spec)
+    a.origin = house_origin(spec) if a.scene == "house" else (0.0, 0.0)
     os.makedirs(a.out, exist_ok=True)
     for i in range(a.start, a.start + a.episodes):
         t0 = time.time()

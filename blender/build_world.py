@@ -76,35 +76,73 @@ def wood(name, color, roughness=0.7):
 
 
 # ------------------------------------------------------------------ house exterior
-def build_exterior(room, col, mats):
+def _subtract(a, b, cuts):
+    """Pieces of the interval [a, b] left after removing each (lo, hi) in cuts."""
+    pieces = [(a, b)]
+    for lo, hi in cuts:
+        nxt = []
+        for x, y in pieces:
+            if hi <= x or lo >= y:
+                nxt.append((x, y))
+                continue
+            if lo > x:
+                nxt.append((x, lo))
+            if hi < y:
+                nxt.append((hi, y))
+        pieces = nxt
+    return [(x, y) for x, y in pieces if y - x > 1e-4]
+
+
+def build_exterior(room, col, mats, skip=(), clip=None, name="house"):
+    """Siding, corner boards, foundation band and a gable roof around `room` (in its own frame).
+
+    skip: walls not clad (shared with a neighbour, so indoors); clip: {wall: [(u_lo, u_hi), ...]} stretches of a
+    wall covered by an annex built against it (no siding, foundation or corner board there)."""
     W, D, H, t = room["width"], room["depth"], room["height"], room["wall_thickness"]
+    clip = clip or {}
     sk = 0.012
     for wall in ("south", "north", "west", "east"):
+        if wall in skip:
+            continue
         for i, (u0, u1, z0, z1) in enumerate(R.wall_segments(room, wall)):
             if wall in ("west", "east"):
                 u0, u1 = (u0 - t - sk if u0 <= 0 else u0), (u1 + t + sk if u1 >= D else u1)
             else:
                 u0, u1 = (u0 - sk if u0 <= -t else u0), (u1 + sk if u1 >= W + t else u1)
-            c, s = R.wall_box(room, wall, u0, u1, z0, z1, inset=-(t + sk), thick=sk)
-            C.box(f"siding_{wall}_{i}", c, s, mats["siding"], collection=col)
-    # corner boards and a foundation band
-    for x, y in ((-t, -t), (W + t, -t), (-t, D + t), (W + t, D + t)):
+            for j, (v0, v1) in enumerate(_subtract(u0, u1, clip.get(wall, []))):
+                c, s = R.wall_box(room, wall, v0, v1, z0, z1, inset=-(t + sk), thick=sk)
+                C.box(f"siding_{wall}_{i}_{j}", c, s, mats["siding"], collection=col)
+    # corner boards (only where two clad walls meet in the open) and a foundation band
+    covered = lambda wall, u: any(lo <= u <= hi for lo, hi in clip.get(wall, []))  # noqa: E731
+    for x, y, ws, we in ((-t, -t, "south", "west"), (W + t, -t, "south", "east"), (-t, D + t, "north", "west"),
+                         (W + t, D + t, "north", "east")):
+        if ws in skip or we in skip or covered(ws, x) or covered(we, y):
+            continue
         C.box("corner_board", (x, y, H / 2), (0.16, 0.16, H), mats["trim"], collection=col)
-    for name, c, s in (("found_s", (W / 2, -t - 0.02, 0.1), (W + 2 * t + 0.08, 0.05, 0.2)),
-                       ("found_n", (W / 2, D + t + 0.02, 0.1), (W + 2 * t + 0.08, 0.05, 0.2)),
-                       ("found_w", (-t - 0.02, D / 2, 0.1), (0.05, D + 2 * t, 0.2)),
-                       ("found_e", (W + t + 0.02, D / 2, 0.1), (0.05, D + 2 * t, 0.2))):
-        C.box(name, c, s, mats["foundation"], collection=col)
-    # roof: gable along x with overhangs, fascia boards; gable triangles above the walls
+    xs0, xs1 = (0.0 if "west" in skip else -t), (W if "east" in skip else W + t)
+    for wall, (u0, u1) in (("south", (xs0 - 0.04, xs1 + 0.04)), ("north", (xs0 - 0.04, xs1 + 0.04)),
+                           ("west", (-t, D + t)), ("east", (-t, D + t))):
+        if wall in skip:
+            continue
+        for j, (v0, v1) in enumerate(_subtract(u0, u1, clip.get(wall, []))):
+            m = (v0 + v1) / 2
+            c, s = {"south": ((m, -t - 0.02, 0.1), (v1 - v0, 0.05, 0.2)), "north": ((m, D + t + 0.02, 0.1), (v1 - v0, 0.05, 0.2)),
+                    "west": ((-t - 0.02, m, 0.1), (0.05, v1 - v0, 0.2)), "east": ((W + t + 0.02, m, 0.1), (0.05, v1 - v0, 0.2))}[wall]
+            C.box(f"found_{wall}_{j}", c, s, mats["foundation"], collection=col)
+    # roof: gable along x with overhangs (none on a shared side), fascia boards; gable triangles above the walls
     ov, th, pitch = 0.4, 0.1, math.tan(math.radians(28))
     rise = (D / 2 + t + ov) * pitch
+    rx0, rx1 = (0.0 if "west" in skip else -t - ov), (W if "east" in skip else W + t + ov)
     roof = C.get_collection("roof")
     # eave height chosen so the roof's underside meets the top of the walls
-    gable_roof("roof", -t - ov, W + t + ov, -t - ov, D + t + ov, H + th - ov * pitch, rise, th, mats["roof"], roof)
-    gable_ends("gable", [-t - 0.005, W + t + 0.005], -t, D + t, H, (D / 2 + t) * pitch, mats["siding"], roof)
-    for name, c, s in (("fascia_s", (W / 2, -t - ov, H - 0.06), (W + 2 * t + 2 * ov, 0.04, 0.2)),
-                       ("fascia_n", (W / 2, D + t + ov, H - 0.06), (W + 2 * t + 2 * ov, 0.04, 0.2))):
-        C.box(name, c, s, mats["trim"], collection=roof)
+    gable_roof(f"{name}_roof" if name != "house" else "roof", rx0, rx1, -t - ov, D + t + ov, H + th - ov * pitch, rise, th,
+               mats["roof"], roof)
+    gable_ends(f"{name}_gable" if name != "house" else "gable",
+               [x for x, w in ((-t - 0.005, "west"), (W + t + 0.005, "east")) if w not in skip], -t, D + t, H,
+               (D / 2 + t) * pitch, mats["siding"], roof)
+    for fname, c, s in (("fascia_s", ((rx0 + rx1) / 2, -t - ov, H - 0.06), (rx1 - rx0, 0.04, 0.2)),
+                        ("fascia_n", ((rx0 + rx1) / 2, D + t + ov, H - 0.06), (rx1 - rx0, 0.04, 0.2))):
+        C.box(fname, c, s, mats["trim"], collection=roof)
     # porch light over the front door
     for o in room.get("openings", []):
         if o["type"] == "door" and o["wall"] == "south":
@@ -112,6 +150,46 @@ def build_exterior(room, col, mats):
             lamp = C.material("porch_lamp", (1, 0.9, 0.7), 0.3, emission=(1.0, 0.85, 0.6, 3.0))
             C.box("porch_light", (x, -t - 0.06, 2.0), (0.12, 0.1, 0.22), lamp, collection=col)
             C.box("porch_canopy", (o["offset"] + o["width"] / 2, -t - 0.45, 2.35), (o["width"] + 0.8, 0.9, 0.06), mats["trim"], collection=col)
+
+
+# ------------------------------------------------------------------ annexes (the kitchen)
+def annex_clips(w):
+    """{wall: [(u_lo, u_hi)]} stretches of the house's outer walls covered by annexes."""
+    t = w["_room"]["wall_thickness"]
+    out = {}
+    for an in w.get("_annexes", []):
+        x0, y0, x1, y1 = an["rect"]
+        wall = world_spec.OPPOSITE[an["shared_wall"]]
+        out.setdefault(wall, []).append((y0 - t, y1 + t) if wall in ("west", "east") else (x0 - t, x1 + t))
+    return out
+
+
+def build_annex(w, an, M):
+    """An annex room built in its own frame (kitchen interior, ceiling light, cladding and roof), then moved to
+    its origin. Its materials keep their own names (`walls`, `floor`, `cabinet`, ...), so the room's are renamed
+    room_* first; its objects get a `<name>_` prefix."""
+    import build_kitchen as BK
+    spec, (ox, oy) = an["spec"], an["origin"]
+    name = spec["name"]
+    before = set(bpy.data.objects)
+    mats = BK.build_materials(spec)
+    BK.build_interior(spec, mats, skip_walls=spec["_skip_walls"])
+    BK.ceiling_light(spec, C.get_collection("lights_cameras"), f"{name}_light")
+    build_exterior(spec, C.get_collection("house_exterior"), M, skip=spec["_skip_walls"], name=name)
+    new = set(bpy.data.objects) - before
+    root = C.empty(f"{name}_origin", (ox, oy, 0.0), 0.0, C.get_collection("house_exterior"))
+    for o in new:
+        if o.parent is None:
+            o.parent = root
+        base = o.name.split(".")[0]
+        if not base.startswith(f"{name}_"):
+            o.name = f"{name}_{base}"
+    # threshold strip across the shared wall's doorway (the floors stop at each room's inner wall face)
+    room, t = w["_room"], w["_room"]["wall_thickness"]
+    door = next(o for o in room["openings"] if o["name"] == an["door"])
+    a, b = door["offset"], door["offset"] + door["width"]
+    c, s = R.wall_box(room, door["wall"], a, b, -0.02, 0.0)
+    C.box(f"{name}_threshold", c, s, M["trim"], collection=C.get_collection("room_shell"))
 
 
 # ------------------------------------------------------------------ outdoor objects (local frame: front = -y)
@@ -403,6 +481,12 @@ def build_cameras(w, col):
     cam("cam_cutaway", (-8.5, -11.5, 13.5), (3.0, 1.2, 0.3), 22)
     cam("cam_street", (9.6, -15.1, 1.7), (1.8, -2.5, 1.3), 22)
     cam("cam_garden", (5.6, 11.7, 2.6), (1.8, 5.0, 0.9), 16)
+    for an in w.get("_annexes", []):  # from the annex's far corner through the shared door
+        x0, y0, x1, y1 = an["rect"]
+        door = next(o for o in w["_room"]["openings"] if o["name"] == an["door"])
+        dm = door["offset"] + door["width"] / 2
+        if an["shared_wall"] == "west":
+            cam(f"cam_{an['spec']['name']}", (x1 - 1.0, y0 + 0.3, 1.7), (x0 - 1.5, dm, 1.0), 14)
     cd = bpy.data.cameras.new("cam_world_top")
     cd.type = "ORTHO"
     cd.ortho_scale = max(x1 - x0, y1 - y0) * 1.04
@@ -431,6 +515,9 @@ def tune_lighting(w):
 def build(w):
     room = w["_room"]
     room_mats = R.build(room)                       # interior, ceiling light, sun + sky, room cameras
+    if w.get("_annexes"):                           # annexes bring their own `walls`, `floor`, ... materials
+        for m in list(bpy.data.materials):
+            m.name = f"room_{m.name}"
     MM = w.get("materials", {})
     M = dict(room_mats)
     M.update(
@@ -451,7 +538,9 @@ def build(w):
     street = C.get_collection("street")
     objs = C.get_collection("outdoor_objects")
     bg = C.get_collection("backdrop")
-    build_exterior(room, ext, M)
+    build_exterior(room, ext, M, clip=annex_clips(w))
+    for an in w.get("_annexes", []):
+        build_annex(w, an, M)
     build_ground(w, street, M)
     build_fences(w, lot, M)
     build_objects(w, objs, M)

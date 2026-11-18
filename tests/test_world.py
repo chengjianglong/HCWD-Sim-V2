@@ -112,3 +112,48 @@ def test_world_export_has_cars(W):
     d = rollout(net, W, 2, steps=10, device=DEV, env_cfg=dict(n_cars=3))
     assert d["car_pos"].shape == (11, 3, 2) and d["car_yaw"].shape == (11, 3)
     assert str(d["kind"]) == "world" and d["bounds"].shape == (4,)
+
+
+# ------------------------------------------------------------------ kitchen annex
+def test_kitchen_annex_joined_by_door(W):
+    w = world_spec.load_world(SPEC)
+    room, (an,) = w["_room"], w["_annexes"]
+    door = next(o for o in room["openings"] if o["name"] == "kitchen_door")
+    assert door["wall"] == "east" and door["open"] == "out"   # leaf swings into the kitchen
+    assert not any(o["type"] == "window" and o["wall"] == "east" for o in room["openings"])  # window_e is now inside
+    ox, oy = an["origin"]
+    assert ox == pytest.approx(room["width"] + room["wall_thickness"])
+    assert door["offset"] == pytest.approx(oy + 2.5)        # living_door's offset on the kitchen's west wall
+    names = {c["name"] for c in world_spec.colliders(w)}
+    assert "kitchen_wall_east_0" in names and not any(n.startswith("kitchen_wall_west") for n in names)
+    assert "kitchen_uppers_n" not in names                  # wall cabinets hang above head height
+    assert [ox, oy, ox + 4.4, oy + 3.6] in W.raw["indoor"]
+    for n in ("kitchen_fridge", "kitchen_counter_n", "kitchen_stove", "kitchen_island", "kitchen_door"):
+        assert (box_signed_distance(_pt(W, n), W) > 0.2).all(), n
+
+
+def test_route_living_room_to_kitchen_goes_through_the_door(W):
+    nav = W.nav()
+    sofa, fridge = _pt(W, "sofa"), _pt(W, "kitchen_fridge")
+    phi, _, _ = nav.potential(sofa, fridge, nav.goal_slot(fridge))
+    assert torch.isfinite(phi).all()
+    assert phi.item() < 12.0                                 # indoors, not round the outside of the house
+    # walk the waypoints: the path crosses the shared wall (x 5.0..5.12) inside the doorway (y 3.1..4.0)
+    p, crossed = sofa.clone(), []
+    for _ in range(300):
+        wp, _ = nav.waypoint(p, fridge, nav.goal_slot(fridge), hops=1)   # one cell ahead: no corner cutting
+        step = wp - p
+        q = p + step / step.norm().clamp(min=1e-6) * min(0.05, step.norm().item())
+        if (p[0, 0] - 5.06) * (q[0, 0] - 5.06) <= 0:
+            crossed.append(q[0, 1].item())
+        p = q
+        if (p - fridge).norm() < 0.3:
+            break
+    assert (p - fridge).norm() < 0.3 and crossed and all(3.1 < y < 4.0 for y in crossed)
+
+
+def test_room_mode_spec_unchanged_by_annex():
+    from worldsim import room_spec
+    room = room_spec.load_spec(os.path.join(os.path.dirname(SPEC), "room.json"))
+    assert "window_e" in {o["name"] for o in room["openings"]}
+    assert "kitchen_door" not in {o["name"] for o in room["openings"]}

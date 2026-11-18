@@ -264,7 +264,7 @@ def p_pan(pr, col, mats):
     x, y, z = pr["at"]
     pan = C.cylinder(pr["name"], (x, y, z + 0.025), 0.13, 0.05, mats["black_glass"], collection=col, verts=40)
     C.box(f"{pr['name']}_handle", (0.0, -0.22, 0.01), (0.03, 0.2, 0.015), mats["plinth"], pan)
-    pan.rotation_euler = (0, 0, math.radians(90))
+    pan.rotation_euler = (0, 0, math.radians(pr.get("rot", 90)))
     return pan
 
 
@@ -280,8 +280,8 @@ def build_cameras(spec, col):
     cam.lens = 14
     cam.clip_start = 0.05
     co = C.link(bpy.data.objects.new("cam_overview", cam), col)
-    co.location = (W - 0.3, 0.3, H - 0.3)
-    C.look_at(co, (W * 0.4, D * 0.75, 0.9))
+    co.location = (0.35, 0.3, H - 0.3)
+    C.look_at(co, (W * 0.62, D * 0.72, 0.9))
     top = bpy.data.cameras.new("cam_top")
     top.type = "ORTHO"
     top.ortho_scale = max(W, D) * 1.12
@@ -291,9 +291,7 @@ def build_cameras(spec, col):
 
 
 # ------------------------------------------------------------------ main
-def build(spec):
-    W, D, H = spec["width"], spec["depth"], spec["height"]
-    BR.BUILDERS.update(KITCHEN_BUILDERS)
+def build_materials(spec):
     M = spec.get("materials", {})
     mats = dict(
         walls=C.material("walls", M.get("walls", {}).get("color", (0.9, 0.88, 0.84)), M.get("walls", {}).get("roughness", 0.9)),
@@ -305,13 +303,22 @@ def build(spec):
         wood_dark=C.material("wood_dark", (0.12, 0.08, 0.05), 0.5),
     )
     mats.update(kitchen_materials(spec))
+    return mats
+
+
+def build_interior(spec, mats, skip_walls=()):
+    """Floor, ceiling, walls (minus `skip_walls`), openings, furniture and props, in the kitchen's own frame."""
+    W, D, H = spec["width"], spec["depth"], spec["height"]
+    BR.BUILDERS.update(KITCHEN_BUILDERS)
     shell = C.get_collection("room_shell")
     furn = C.get_collection("furniture")
     props = C.get_collection("props")
-    rig = C.get_collection("lights_cameras")
     C.box("floor", (W / 2, D / 2, -0.01), (W, D, 0.02), mats["floor"], collection=shell)
-    C.box("ceiling", (W / 2, D / 2, H + 0.01), (W + 0.3, D + 0.3, 0.02), mats["ceiling"], collection=shell)
-    BR.build_walls(spec, shell, mats)
+    # the ceiling overlaps into the walls, but not through a shared wall into the neighbouring room
+    cx0, cx1 = (0.0 if "west" in skip_walls else -0.15), (W if "east" in skip_walls else W + 0.15)
+    cy0, cy1 = (0.0 if "south" in skip_walls else -0.15), (D if "north" in skip_walls else D + 0.15)
+    C.box("ceiling", ((cx0 + cx1) / 2, (cy0 + cy1) / 2, H + 0.01), (cx1 - cx0, cy1 - cy0, 0.02), mats["ceiling"], collection=shell)
+    BR.build_walls(spec, shell, mats, skip=skip_walls)
     BR.build_openings(spec, shell, mats)
     # build_room's builders take (f, parent, mat, mats); kitchen ones ignore `mat` and use the shared mats
     for f in spec.get("furniture", []):
@@ -321,10 +328,33 @@ def build(spec):
             if furn not in ch.users_collection:
                 C._move_to(ch, furn)
     for pr in spec.get("props", []):
+        before = set(bpy.data.objects)
         PROP_BUILDERS[pr["type"]](pr, props, mats)
-        for o in list(bpy.data.objects):
-            if o.name.startswith(pr["name"]) and props not in o.users_collection:
+        for o in set(bpy.data.objects) - before:
+            if props not in o.users_collection:
                 C._move_to(o, props)
+
+
+def ceiling_light(spec, col, name="kitchen_light"):
+    """Area light + emissive fixture in the middle of the ceiling (the annex's own; the house has the sun)."""
+    W, D, H = spec["width"], spec["depth"], spec["height"]
+    area = bpy.data.lights.new(name, "AREA")
+    area.shape = "DISK"
+    area.size = 0.5
+    area.energy = spec.get("lights", {}).get("ceiling_light_power", 120.0)
+    area.color = (1.0, 0.9, 0.78)
+    ao = C.link(bpy.data.objects.new(name, area), col)
+    ao.location = (W / 2, D / 2, H - 0.06)
+    fixture = C.material("fixture", (1, 1, 1), 0.3, emission=(1.0, 0.93, 0.82, 4.0))
+    C.cylinder(f"{name.removesuffix('_light')}_ceiling_fixture", (W / 2, D / 2, H - 0.025), 0.26, 0.05, fixture, collection=col)
+    return ao
+
+
+def build(spec):
+    """The standalone kitchen (assets/kitchen.blend): interior + sun/sky + ceiling light + check cameras."""
+    mats = build_materials(spec)
+    build_interior(spec, mats)
+    rig = C.get_collection("lights_cameras")
     BR.build_lighting(spec, rig)
     build_cameras(spec, rig)
     return mats
