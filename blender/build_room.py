@@ -15,6 +15,8 @@ import bpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as C  # noqa: E402
+import models as MDL  # noqa: E402
+import pbr  # noqa: E402
 from worldsim import room_spec  # noqa: E402
 
 
@@ -241,8 +243,13 @@ def f_lamp(f, p, mat, mats):
 
 def f_rug(f, p, mat, mats):
     w, d, h = f["size"]
-    C.box(f"{f['name']}_rug", (0, 0, h / 2), (w, d, h), C.fabric_material(f"rug_{f['name']}", f["color"]), p)
-    C.box(f"{f['name']}_border", (0, 0, h / 2 + 0.0005), (w - 0.1, d - 0.1, h), C.fabric_material(f"rugb_{f['name']}", [c * 0.7 for c in f["color"]]), p)
+    c = f["color"]
+    rug = pbr.pbr_material(f"rug_{f['name']}", "rug_fabric", tint=pbr_tint(c, 0.6), scale=1.5,
+                           fallback=lambda: C.fabric_material(f"rug_{f['name']}", c))
+    border = pbr.pbr_material(f"rugb_{f['name']}", "rug_fabric", tint=[0.6 * x for x in pbr_tint(c, 0.6)], scale=1.5,
+                              fallback=lambda: C.fabric_material(f"rugb_{f['name']}", [x * 0.7 for x in c]))
+    C.box(f"{f['name']}_rug", (0, 0, h / 2), (w, d, h), rug, p)
+    C.box(f"{f['name']}_border", (0, 0, h / 2 + 0.0005), (w - 0.1, d - 0.1, h), border, p)
 
 
 def f_generic(f, p, mat, mats):
@@ -254,22 +261,53 @@ BUILDERS = dict(sofa=f_sofa, table=f_table, chair=f_chair, tv_stand=f_tv_stand, 
                 plant=f_plant, lamp=f_lamp, rug=f_rug)
 
 
+def pbr_tint(color, amount=1.0):
+    """A spec colour as a tint for a photo texture: hue kept, brightness normalised (the photo supplies the albedo);
+    amount < 1 blends towards white (a light touch of colour)."""
+    m = max(max(color[:3]), 1e-3)
+    return [1.0 - amount + amount * c / m for c in color[:3]]
+
+
+def _wood(name, col):
+    m = C.material(name, col, 0.5)
+    C._noise_color(m, col, scale=6.0, detail=10.0, var=0.18, stretch=(1, 15, 1))
+    return m
+
+
 def furniture_material(f):
     col = f.get("color", (0.5, 0.5, 0.5))
+    name = f"mat_{f['name']}"
     if f["type"] == "sofa":
-        return C.fabric_material(f"mat_{f['name']}", col)
+        return pbr.pbr_material(name, "fabric_sofa", tint=pbr_tint(col, 0.8), fallback=lambda: C.fabric_material(name, col))
     if f["type"] in ("table", "chair", "bookshelf"):
-        m = C.material(f"mat_{f['name']}", col, 0.5)
-        C._noise_color(m, col, scale=6.0, detail=10.0, var=0.18, stretch=(1, 15, 1))
-        return m
-    return C.material(f"mat_{f['name']}", col, 0.5)
+        return pbr.pbr_material(name, "wood_light", tint=pbr_tint(col, 0.3), fallback=lambda: _wood(name, col))
+    if f["type"] == "tv_stand":
+        return pbr.pbr_material(name, "wood_dark", fallback=lambda: C.material(name, col, 0.5))
+    return C.material(name, col, 0.5)
 
 
-def build_furniture(spec, col, mats):
-    for f in spec.get("furniture", []):
+# furniture type -> model slot in configs/assets.json (a spec item can override with "model": "<slot or id>", or
+# opt out with "model": false). Lamps keep their procedural build (they carry the point light), TV stands too
+# (the TV must match the stand), rugs get a photo-textured fabric instead.
+MODEL_SLOTS = dict(sofa="sofa", chair="chair", bookshelf="bookshelf", plant="plant", stool="stool")
+
+
+def model_slot(f):
+    if "model" in f:
+        return f["model"] or None
+    if f["type"] == "table":
+        return "coffee_table" if f["size"][2] < 0.55 else "dining_table"
+    return MODEL_SLOTS.get(f["type"])
+
+
+def build_furniture(spec, col, mats, builders=None):
+    builders = builders or BUILDERS
+    for k, f in enumerate(spec.get("furniture", [])):
         parent = C.empty(f["name"], (f["center"][0], f["center"][1], 0.0), math.radians(f.get("rot", 0.0)), col)
-        BUILDERS.get(f["type"], f_generic)(f, parent, furniture_material(f), mats)
-        for ch in parent.children:  # objects created by bpy.ops land in the active collection
+        slot = model_slot(f)
+        if not (slot and MDL.place(slot, f["size"], parent, col, choice=f.get("model_choice", 0), variant=k)):
+            builders.get(f["type"], f_generic)(f, parent, furniture_material(f), mats)
+        for ch in parent.children_recursive:  # objects created by bpy.ops land in the active collection
             if col not in ch.users_collection:
                 C._move_to(ch, col)
 
@@ -296,6 +334,11 @@ def build_lighting(spec, col):
     so = C.link(bpy.data.objects.new("sun", sun), col)
     el, az = math.radians(L.get("sun_elevation_deg", 35)), math.radians(L.get("sun_azimuth_deg", 200))
     so.rotation_euler = (math.pi / 2 - el, 0, az + math.pi / 2)
+    # Photo-realistic sky when downloaded: an HDRI lights the scene (its sun included), so the sun lamp is
+    # switched off but kept (by name) for code that looks it up. Nishita sky + sun lamp otherwise.
+    hdris = pbr.hdri_ids("sky")
+    if hdris and pbr.hdri_world(world, hdris[0], L.get("hdri_strength", 1.0), L.get("hdri_rotation_deg", 0.0)):
+        sun.energy = 0.0
 
     area = bpy.data.lights.new("ceiling_light", "AREA")
     area.shape = "DISK"
@@ -328,9 +371,13 @@ def build_cameras(spec, col):
 def build(spec):
     W, D, H = spec["width"], spec["depth"], spec["height"]
     M = spec.get("materials", {})
+    wc = M.get("walls", {}).get("color", (0.86, 0.84, 0.8))
+    cc = M.get("ceiling", {}).get("color", (0.93, 0.93, 0.92))
     mats = dict(
-        walls=C.material("walls", M.get("walls", {}).get("color", (0.86, 0.84, 0.8)), M.get("walls", {}).get("roughness", 0.9)),
-        ceiling=C.material("ceiling", M.get("ceiling", {}).get("color", (0.93, 0.93, 0.92)), 0.95),
+        walls=pbr.pbr_material("walls", "wall_plaster", albedo=wc, normal_strength=0.4,
+                               fallback=lambda: C.material("walls", wc, M.get("walls", {}).get("roughness", 0.9))),
+        ceiling=pbr.pbr_material("ceiling", "ceiling_paint", albedo=cc, normal_strength=0.2,
+                                 fallback=lambda: C.material("ceiling", cc, 0.95)),
         trim=C.material("trim", (0.95, 0.95, 0.94), 0.4),
         door=C.material("door", (0.92, 0.91, 0.88), 0.45),
         glass=C.material("glass", (0.9, 0.95, 1.0), 0.02, transmission=1.0),
@@ -342,7 +389,9 @@ def build(spec):
     )
     fl = M.get("floor", {})
     if fl.get("type", "wood") == "wood":
-        mats["floor"] = C.wood_material("floor", fl.get("color", (0.42, 0.28, 0.16)), fl.get("roughness", 0.45))
+        fc = fl.get("color", (0.42, 0.28, 0.16))
+        mats["floor"] = pbr.pbr_material("floor", "floor_wood", albedo=fc,
+                                         fallback=lambda: C.wood_material("floor", fc, fl.get("roughness", 0.45)))
     else:
         mats["floor"] = C.material("floor", fl.get("color", (0.5, 0.5, 0.5)), fl.get("roughness", 0.6))
 
@@ -362,9 +411,14 @@ def build(spec):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", default=room_spec.DEFAULT_SPEC)
-    ap.add_argument("--out", default=C.ASSETS)
+    ap.add_argument("--out", help="output folder (default: assets/photoreal for photo builds, assets otherwise)")
+    ap.add_argument("--realism", choices=["auto", "photo", "procedural"], default="auto",
+                    help="photo: CC0 photo-scanned materials, models and HDRI sky (scripts/fetch_assets.py); "
+                         "procedural: the original look; auto: photo when the assets are downloaded")
     ap.add_argument("--no-glb", action="store_true")
     a = ap.parse_args(C.script_args())
+    a.out = a.out or pbr.configure(a.realism)
+    pbr.configure(a.realism)
     spec = room_spec.load_spec(a.spec)
     os.makedirs(a.out, exist_ok=True)
     C.clear_scene()

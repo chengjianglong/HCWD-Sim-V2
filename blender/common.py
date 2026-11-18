@@ -10,6 +10,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 ASSETS = os.path.join(ROOT, "assets")
+PHOTOREAL = os.path.join(ASSETS, "photoreal")  # photo-asset builds (not in git: they reference assets/polyhaven)
+
+
+def scene_blend(name, realism="auto"):
+    """Path of a built scene (room / kitchen / world .blend): the photo-real build when it exists (or is asked for),
+    else the procedural one that ships in git."""
+    photo = os.path.join(PHOTOREAL, f"{name}.blend")
+    if realism == "photo" or (realism == "auto" and os.path.exists(photo)):
+        return photo
+    return os.path.join(ASSETS, f"{name}.blend")
 
 
 def script_args():

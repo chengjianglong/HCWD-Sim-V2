@@ -28,7 +28,7 @@ import pyarrow.parquet as pq
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from worldsim import ego  # noqa: E402
+from worldsim import ego, sensor  # noqa: E402
 
 CHUNK = 1000
 PHASES = ["idle", "reach", "lift", "chop", "return", "release", "retract", "idle_end"]
@@ -51,7 +51,7 @@ def cuts_done(phases, n_cuts):
     return out
 
 
-def write_video(frames_dir, n, path, fps, crf=18):
+def write_video(frames_dir, n, path, fps, crf=18, sensor=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     first = Image.open(os.path.join(frames_dir, f"{0:06d}.png"))
     w, h = first.size
@@ -59,7 +59,8 @@ def write_video(frames_dir, n, path, fps, crf=18):
                                      output_params=["-crf", str(crf), "-g", "2"], macro_block_size=1)
     wr.send(None)
     for i in range(n):
-        wr.send(np.ascontiguousarray(np.asarray(Image.open(os.path.join(frames_dir, f"{i:06d}.png")).convert("RGB"))))
+        im = np.asarray(Image.open(os.path.join(frames_dir, f"{i:06d}.png")).convert("RGB"))
+        wr.send(np.ascontiguousarray(sensor(im) if sensor else im))
     wr.close()
     return w, h
 
@@ -71,6 +72,10 @@ def main():
     ap.add_argument("--ref", choices=["head", "world"], default="head", help="frame the hand poses are expressed in")
     ap.add_argument("--hand", choices=["right", "left"], default="right", help="hand for observation.state / action")
     ap.add_argument("--views", nargs="*", help="cameras to export (default: all in the raw data)")
+    ap.add_argument("--sensor", choices=["realistic", "none"], default="realistic",
+                    help="realistic: per-episode simulated camera (distortion, vignetting, exposure/WB, noise, "
+                         "compression; worldsim/sensor.py); none: the clean renders")
+    ap.add_argument("--seed", type=int, default=0, help="sensor randomisation seed")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args()
     eps = ego.load_raw(a.raw)
@@ -112,12 +117,18 @@ def main():
         p = os.path.join(a.out, "data", f"chunk-{chunk:03d}", f"episode_{ei:06d}.parquet")
         os.makedirs(os.path.dirname(p), exist_ok=True)
         pq.write_table(table, p)
+        ep_cams, ep_sensors = {}, {}
         for v in views:
+            cam = sensor.CameraSensor(v, m["intrinsics"][v], sensor.seed_for(a.seed, os.path.basename(d), v), a.sensor)
             w, h = write_video(os.path.join(d, v), n, os.path.join(
-                a.out, "videos", f"chunk-{chunk:03d}", f"observation.images.{v}", f"episode_{ei:06d}.mp4"), fps)
-            cameras.setdefault(v, m["intrinsics"][v])
+                a.out, "videos", f"chunk-{chunk:03d}", f"observation.images.{v}", f"episode_{ei:06d}.mp4"), fps,
+                sensor=cam if a.sensor == "realistic" else None)
+            ep_cams[v] = cam.intrinsics() if a.sensor == "realistic" else m["intrinsics"][v]
+            ep_sensors[v] = cam.describe()
+            cameras.setdefault(v, ep_cams[v])
         episodes.append({"episode_index": ei, "tasks": [task], "length": n, "source": os.path.basename(d),
-                         "task_info": m["task"]})
+                         "task_info": m["task"], "cameras": ep_cams, "sensor": ep_sensors,
+                         "domain": m.get("domain", {})})
         all_state.append(state), all_act.append(act), all_sb.append(sb), all_ab.append(ab)
         index += n
         print(f"[lerobot] {ei + 1}/{len(eps)} {os.path.basename(d)}: {n} frames, '{task}'", flush=True)
@@ -155,7 +166,10 @@ def main():
         "features": features,
         "ego": {"reference_frame": a.ref, "main_hand": a.hand, "phases": PHASES,
                 "state": "hand pos, axis-angle, finger widths (0.04 open..0 closed) - see worldsim/ego.py",
-                "action": "delta pos, delta axis-angle (t->t+1, in the reference frame at t), gripper -1 open/+1 closed"},
+                "action": "delta pos, delta axis-angle (t->t+1, in the reference frame at t), gripper -1 open/+1 closed",
+                "sensor": a.sensor,
+                "cameras": "per-episode intrinsics (OpenCV pinhole + dist k1,k2,p1,p2,k3) in meta/episodes.jsonl; "
+                           "meta/cameras.json holds episode 0's"},
     }
     meta = os.path.join(a.out, "meta")
     os.makedirs(meta, exist_ok=True)

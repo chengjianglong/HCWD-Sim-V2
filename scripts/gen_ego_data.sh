@@ -3,7 +3,7 @@
 #
 #   scripts/gen_ego_data.sh [EPISODES] [JOBS]        e.g. scripts/gen_ego_data.sh 200 2
 #
-# Env overrides: SCENE (kitchen|house), SEED (0), RES (256), FPS (10), ENGINE (eevee|cycles), SAMPLES (8), RAW (data/ego_raw),
+# Env overrides: SCENE (kitchen|house), SEED (0), RES (256), FPS (10), ENGINE (cycles|eevee), SAMPLES (32), RAW (data/ego_raw),
 #                LEROBOT (data/ego_lerobot), VLAQWEN (data/ego_vlaqwen), VIEWS ("head right_wrist" for vla-qwen).
 # JOBS Blender processes render disjoint episode ranges in parallel (job j gets CUDA_VISIBLE_DEVICES=j, which
 # picks the GPU for Cycles; EEVEE draws on the first GPU it finds). Episodes already rendered are skipped,
@@ -16,8 +16,8 @@ SCENE=${SCENE:-kitchen}
 SEED=${SEED:-0}
 RES=${RES:-256}
 FPS=${FPS:-10}
-ENGINE=${ENGINE:-eevee}
-SAMPLES=${SAMPLES:-8}
+ENGINE=${ENGINE:-cycles}
+SAMPLES=${SAMPLES:-32}
 RAW=${RAW:-data/ego_raw}
 LEROBOT=${LEROBOT:-data/ego_lerobot}
 VLAQWEN=${VLAQWEN:-data/ego_vlaqwen}

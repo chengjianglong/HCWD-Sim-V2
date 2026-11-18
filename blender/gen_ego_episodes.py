@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chop  # noqa: E402
 import common as C  # noqa: E402
 import ego_rig  # noqa: E402
+import pbr  # noqa: E402
 import rocketbox as RB  # noqa: E402
 from worldsim import room_spec  # noqa: E402
 
@@ -50,6 +51,9 @@ def set_color(mat_name, rgb, rng, var=0.06):
     if mat is None:
         return
     c = np.clip(np.array(rgb) * rng.uniform(1 - var, 1 + var, 3), 0, 1)
+    if mat.get("pbr_mean") is not None:  # photo-textured: keep the texture, give it this average colour
+        pbr.set_albedo(mat, [float(x) for x in c])
+        return
     nt = mat.node_tree
     for n in nt.nodes:
         if n.type == "BSDF_PRINCIPLED" and not n.inputs["Base Color"].is_linked:
@@ -61,6 +65,46 @@ def set_color(mat_name, rgb, rng, var=0.06):
             n.color_ramp.elements[0].color = (*np.clip(c * 0.88, 0, 1), 1)
             n.color_ramp.elements[-1].color = (*np.clip(c * 1.08, 0, 1), 1)
     mat.diffuse_color = (*c, 1)
+
+
+# photo-texture slots re-drawn per episode (material name in the kitchen -> texture slot)
+TEXTURE_SLOTS = dict(cabinet="cabinet", worktop="worktop_stone", backsplash="backsplash_tile", floor="kitchen_floor_tile",
+                     walls="wall_plaster")
+
+
+def randomise_domain(drng, spec):
+    """Photo-real domain randomisation (own RNG, so the task draws stay identical to the procedural pipeline):
+    texture variant per kitchen surface, HDRI sky + rotation + strength, worktop clutter. Returns a record."""
+    dom = {}
+    if pbr.ENABLED is False:
+        return dom
+    tex = {}
+    for name, slot in TEXTURE_SLOTS.items():
+        mat = bpy.data.materials.get(name)
+        ids = pbr.slot_ids(slot)
+        if mat is not None and mat.get("pbr_id") and ids:
+            aid = ids[int(drng.integers(len(ids)))]
+            if pbr.set_variant(mat, aid):
+                tex[name] = aid
+    if tex:
+        dom["textures"] = tex
+    w = bpy.context.scene.world
+    if w is not None and w.get("hdri"):
+        pool = pbr.hdri_ids("sky") + pbr.hdri_ids("overcast")
+        aid = pool[int(drng.integers(len(pool)))]
+        rot, strength = float(drng.uniform(0, 360)), float(drng.uniform(0.6, 1.5))
+        pbr.hdri_world(w, aid, strength, rot)
+        dom["hdri"] = dict(id=aid, rotation_deg=round(rot, 1), strength=round(strength, 3))
+    import build_kitchen as BK  # clutter on the free worktops, re-sampled every episode
+    old = [o for o in bpy.data.objects if o.get("clutter")]
+    for o in old:
+        for ch in o.children_recursive:
+            bpy.data.objects.remove(ch)
+        bpy.data.objects.remove(o)
+    col = C.get_collection("props")
+    placed = BK.build_clutter(spec, col, seed=int(drng.integers(1 << 31)), n=int(drng.integers(3, 9)))
+    dom["clutter"] = [o.children[0].get("model") for o in placed if o.children]
+    return dom
 
 
 def randomise_scene(rng):
@@ -79,8 +123,11 @@ def randomise_scene(rng):
         k = rng.uniform(0, 1)
         light.data.color = (1.0, 0.85 + 0.15 * k, 0.7 + 0.3 * k)
     w = bpy.context.scene.world
-    if w and w.use_nodes:
-        w.node_tree.nodes["Background"].inputs["Strength"].default_value = rng.uniform(0.2, 0.5)
+    strength = rng.uniform(0.2, 0.5)  # drawn in every case, so the task RNG sequence never changes
+    if w and w.use_nodes and not w.get("hdri"):
+        w.node_tree.nodes["Background"].inputs["Strength"].default_value = strength
+    if w is not None and w.get("hdri") and sun:  # the HDRI carries the sun
+        sun.data.energy = 0.0
 
 
 def setup_render(sc, a, views):
@@ -94,6 +141,13 @@ def setup_render(sc, a, views):
     if a.engine == "cycles":
         import render_rollout as RR
         RR.setup_gpu_cycles(sc, a.samples)
+        sc.cycles.use_adaptive_sampling = True
+        sc.cycles.adaptive_threshold = 0.02
+        sc.cycles.max_bounces, sc.cycles.diffuse_bounces, sc.cycles.glossy_bounces = 6, 3, 3
+        sc.cycles.sample_clamp_indirect = 8.0  # no fireflies from the HDRI sun through the windows
+        sc.render.use_persistent_data = True  # keep the BVH between frames: the static scene is most of it
+        sc.render.use_motion_blur = not a.no_motion_blur  # a real camera integrates over its exposure
+        sc.render.motion_blur_shutter = 0.5
     else:
         sc.render.engine = "BLENDER_EEVEE_NEXT"
         sc.eevee.taa_render_samples = a.samples
@@ -138,13 +192,17 @@ def shift_scene(origin):
 
 def run_episode(idx, a, spec, out_root):
     rng = np.random.default_rng([a.seed, idx])
+    drng = np.random.default_rng([a.seed, idx, 1729])  # domain randomisation of the photo-real scene
     bpy.ops.wm.open_mainfile(filepath=a.blend)
+    pbr.ENABLED = bool(bpy.context.scene.world and bpy.context.scene.world.get("hdri")) or any(
+        m.get("pbr_id") for m in bpy.data.materials)
     if a.scene == "house":
         shift_scene(a.origin)
     RB._CLIPS.clear()
     RB._REST.clear()
     sc = bpy.context.scene
     randomise_scene(rng)
+    domain = randomise_domain(drng, spec) if pbr.ENABLED else {}
     T = spec["task"]
     colors = list(T["apple"]["colors"])
     color = colors[int(rng.integers(len(colors)))]
@@ -214,7 +272,7 @@ def run_episode(idx, a, spec, out_root):
         task=dict(apple_color=color, n_cuts=ep.n_cuts, pieces=ep.n_cuts + 1, chop_hz=ep.hz, apple_radius=ep.radius,
                   distractors=distract, avatar=ep.avatar, cook_x=ep.cook_x, clip_start=ep.clip_start),
         render=dict(engine=a.engine, res=a.res, samples=a.samples, seconds=round(t_render, 1)),
-        scene=a.scene, scene_origin=list(a.origin),
+        scene=a.scene, scene_origin=list(a.origin), realism="photo" if pbr.ENABLED else "procedural", domain=domain,
         frames=frames,
     )
     with open(os.path.join(ep_dir, "episode.json"), "w") as f:
@@ -227,6 +285,8 @@ def run_episode(idx, a, spec, out_root):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", default=os.path.join(C.ROOT, "configs", "kitchen.json"))
+    ap.add_argument("--realism", choices=["auto", "photo", "procedural"], default="auto",
+                    help="photo-asset scene build (assets/photoreal) when it exists, else the procedural one")
     ap.add_argument("--scene", choices=["kitchen", "house"], default="kitchen",
                     help="standalone kitchen, or the kitchen joined to the living room in the whole house")
     ap.add_argument("--blend", help="default: assets/kitchen.blend or assets/world.blend for --scene house")
@@ -244,10 +304,11 @@ def main():
     ap.add_argument("--no-jitter", action="store_true", help="exact rig mounts (no per-episode offsets)")
     ap.add_argument("--no-render", action="store_true", help="poses only (fast check)")
     ap.add_argument("--keep-blend", action="store_true", help="save each episode's animated .blend")
+    ap.add_argument("--no-motion-blur", action="store_true", help="Cycles: sharp frames (default: 0.5 shutter blur)")
     a = ap.parse_args(C.script_args())
     if a.fisheye and a.engine != "cycles":
         ap.error("--fisheye needs --engine cycles")
-    a.blend = a.blend or os.path.join(C.ASSETS, "world.blend" if a.scene == "house" else "kitchen.blend")
+    a.blend = a.blend or C.scene_blend("world" if a.scene == "house" else "kitchen", a.realism)
     if not os.path.exists(a.blend):
         builder = "build_world.py" if a.scene == "house" else "build_kitchen.py"
         sys.exit(f"{a.blend} missing: run tools/blender/blender -b -P blender/{builder}")

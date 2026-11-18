@@ -19,6 +19,8 @@ import bpy
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_room as R  # noqa: E402
 import common as C  # noqa: E402
+import models as MDL  # noqa: E402
+import pbr  # noqa: E402
 from worldsim import world_spec  # noqa: E402
 
 
@@ -200,14 +202,17 @@ def o_patio(f, p, M):
     for i in range(n_x):
         for j in range(n_y):
             col = [c * rng.uniform(0.88, 1.08) for c in f["color"]]
-            m = C.material(f"paver_{i % 3}{j % 2}", col, 0.85)
+            m = pbr.pbr_material(f"paver_{i % 3}{j % 2}", "pavers", albedo=col, scale=1.0,
+                                 fallback=lambda: C.material(f"paver_{i % 3}{j % 2}", col, 0.85))
             C.box(f"{f['name']}_paver", (-w / 2 + (i + 0.5) * w / n_x, -d / 2 + (j + 0.5) * d / n_y, h / 2),
                   (w / n_x - 0.02, d / n_y - 0.02, h), m, p)
 
 
 def o_flat(f, p, M):
     w, d, h = f["size"]
-    C.box(f["name"], (0, 0, h / 2), (w, d, h), stone_material(f"mat_{f['name']}", f["color"]), p)
+    m = pbr.pbr_material(f"mat_{f['name']}", "concrete", albedo=f["color"],
+                         fallback=lambda: stone_material(f"mat_{f['name']}", f["color"]))
+    C.box(f["name"], (0, 0, h / 2), (w, d, h), m, p)
 
 
 def o_patio_table(f, p, M):
@@ -266,8 +271,20 @@ def o_garden_bed(f, p, M):
         C.box(f"{f['name']}_side", (0, sy * (d / 2 - t / 2), h / 2), (w, t, h), frame, p)
     for sx in (-1, 1):
         C.box(f"{f['name']}_end", (sx * (w / 2 - t / 2), 0, h / 2), (t, d - 2 * t, h), frame, p)
-    C.box(f"{f['name']}_soil", (0, 0, h - 0.06), (w - 2 * t, d - 2 * t, 0.04), C.material("soil", (0.12, 0.08, 0.05), 1.0), p)
+    soil = pbr.pbr_material("soil", "soil", albedo=(0.12, 0.08, 0.05), fallback=lambda: C.material("soil", (0.12, 0.08, 0.05), 1.0))
+    C.box(f"{f['name']}_soil", (0, 0, h - 0.06), (w - 2 * t, d - 2 * t, 0.04), soil, p)
     rng = random.Random(f["name"])
+    plants = "flowers" if f.get("flowers") else "vegetables"
+    if MDL.available(plants):  # real plants scattered over the soil
+        pts, rot, sc = [], [], []
+        for i in range(int((w - 0.2) / 0.22)):
+            for j in range(int((d - 0.2) / 0.22)):
+                pts.append((-w / 2 + 0.2 + i * 0.22 + rng.uniform(-0.05, 0.05), -d / 2 + 0.2 + j * 0.22 + rng.uniform(-0.05, 0.05), h - 0.04))
+                rot.append(rng.uniform(0, 2 * math.pi))
+                sc.append(rng.uniform(0.8, 1.3))
+        o = MDL.scatter(plants, pts, p.users_collection[0], f"{f['name']}_{plants}", rot, sc, seed=len(f["name"]))
+        o.parent = p
+        return
     green = C.material("veg_leaf", (0.18, 0.42, 0.12), 0.6)
     petals = [C.material(f"petal_{i}", c, 0.5) for i, c in enumerate([(0.85, 0.1, 0.15), (0.95, 0.75, 0.1), (0.6, 0.2, 0.7), (0.95, 0.95, 0.95)])]
     for i in range(int(w / 0.3)):
@@ -355,15 +372,99 @@ def o_generic(f, p, M):
     C.box(f["name"], (0, 0, h / 2), (w, d, h), C.material(f"mat_{f['name']}", f["color"], 0.5), p, bevel=0.02)
 
 
+# object type -> model slot (configs/assets.json); a spec object can override with "model": "<slot or id>" / false
+WORLD_MODELS = dict(tree="tree", shrub="shrub", bench="bench", patio_table="patio_table", street_lamp="street_lamp",
+                    bins="bins")
+
+
+def object_model(f, p, col, k):
+    """Place a real model for a world object inside its JSON box; False if none (the procedural builder runs)."""
+    slot = f["model"] if "model" in f else WORLD_MODELS.get(f["type"])
+    if f["type"] == "generic" and "model" not in f and "ac" in f["name"].split("_"):
+        slot = "ac_unit"
+    if not slot or not MDL.available(slot):
+        return False
+    w, d, h = f["size"]
+    if f["type"] == "tree":  # the JSON box is the trunk; the canopy radius sizes the crown
+        rc = f.get("canopy", 2.0)
+        return bool(MDL.place(slot, (2 * rc, 2 * rc, h), p, col, fit="height", choice=k))
+    if f["type"] == "street_lamp":
+        return bool(MDL.place(slot, (w, d, h), p, col, fit="height"))
+    if f["type"] == "bins":  # two bins side by side along the box
+        ok = False
+        for i, sy in enumerate((-1, 1)):
+            q = C.empty(f"{f['name']}_{i}", (0, sy * d / 4, 0), 0.0, col)
+            q.parent = p
+            ok |= bool(MDL.place(slot, (w, d / 2 - 0.04, h), q, col, variant=i))
+        return ok
+    if f["type"] == "patio_table":
+        ok = bool(MDL.place(slot, (w, d, h), p, col))
+        if ok:  # keep the parasol: patio sets have one
+            C.cylinder(f"{f['name']}_pole", (0, 0, 1.2), 0.02, 2.0, M_METAL[0], p, verts=8)
+            canopy = C.material("umbrella", (0.75, 0.2, 0.15), 0.8)
+            mesh(f"{f['name']}_umbrella_cone", [(1.2 * math.cos(a * math.pi / 4), 1.2 * math.sin(a * math.pi / 4), 1.95)
+                                                 for a in range(8)] + [(0, 0, 2.3)],
+                 [(i, (i + 1) % 8, 8) for i in range(8)], canopy, parent=p, collection=col)
+        return ok
+    return bool(MDL.place(slot, (w, d, h), p, col, variant=k))
+
+
+M_METAL = [None]
+
+
+def build_grass(w, col, spacing=0.2, margin=3.0):
+    """Scatter real grass clumps over the lawn of the lot (and a margin around it), off paths, patio, beds, road,
+    pavements and buildings. The lawn texture still covers the ground under and beyond them."""
+    if not MDL.available("grass_clump"):
+        return None
+    x0, y0, x1, y1 = w["bounds"]
+    x0, x1, y0, y1 = x0 - margin, x1 + margin, y0, y1 + margin
+    rects = [tuple(r) for r in w.get("road", []) + w.get("sidewalks", []) + w.get("crosswalks", [])]
+    room, t = w["_room"], w["_room"]["wall_thickness"]
+    rects.append((-t - 0.1, -t - 0.1, room["width"] + t + 0.1, room["depth"] + t + 0.1))
+    for an in w.get("_annexes", []):
+        ax0, ay0, ax1, ay1 = an["rect"]
+        rects.append((ax0 - t - 0.1, ay0 - t - 0.1, ax1 + t + 0.1, ay1 + t + 0.1))
+    boxes = [(o["center"], o["size"], math.radians(o.get("rot", 0))) for o in w.get("objects", [])
+             if o["type"] in ("patio", "path", "step", "garden_bed", "shed", "bins", "bbq", "bus_stop", "generic", "mailbox")]
+
+    def free(x, y):
+        if any(a <= x <= c and b <= y <= d for a, b, c, d in rects):
+            return False
+        for (cx, cy), (bw, bd, _), a in boxes:
+            u = (x - cx) * math.cos(a) + (y - cy) * math.sin(a)
+            v = -(x - cx) * math.sin(a) + (y - cy) * math.cos(a)
+            if abs(u) < bw / 2 + 0.08 and abs(v) < bd / 2 + 0.08:
+                return False
+        return True
+
+    rng = random.Random(5)
+    pts, rot, sc = [], [], []
+    y = y0
+    while y < y1:
+        x = x0
+        while x < x1:
+            px, py = x + rng.uniform(-0.4, 0.4) * spacing, y + rng.uniform(-0.4, 0.4) * spacing
+            if free(px, py):
+                pts.append((px, py, -0.012))
+                rot.append(rng.uniform(0, 2 * math.pi))
+                sc.append(rng.uniform(0.7, 1.4))
+            x += spacing
+        y += spacing
+    return MDL.scatter("grass_clump", pts, col, "lawn_grass", rot, sc, seed=7)
+
+
 BUILDERS = dict(patio=o_patio, path=o_flat, step=o_flat, patio_table=o_patio_table, bbq=o_bbq, tree=o_tree, shrub=o_shrub,
                 garden_bed=o_garden_bed, bench=o_bench, shed=o_shed, bins=o_bins, mailbox=o_mailbox,
                 street_lamp=o_street_lamp, bus_stop=o_bus_stop, generic=o_generic)
 
 
 def build_objects(w, col, M):
-    for f in w.get("objects", []):
+    M_METAL[0] = M["metal"]
+    for k, f in enumerate(w.get("objects", [])):
         parent = C.empty(f["name"], (f["center"][0], f["center"][1], 0.0), math.radians(f.get("rot", 0.0)), col)
-        BUILDERS.get(f["type"], o_generic)(f, parent, M)
+        if not object_model(f, parent, col, k):
+            BUILDERS.get(f["type"], o_generic)(f, parent, M)
         for ch in parent.children:
             if col not in ch.users_collection:
                 C._move_to(ch, col)
@@ -405,8 +506,10 @@ def build_ground(w, col, M):
 
 
 def build_fences(w, col, M):
-    panel = wood("fence_wood", (0.48, 0.34, 0.22))
-    post = wood("fence_post", (0.36, 0.25, 0.16))
+    panel = pbr.pbr_material("fence_wood", "fence_wood", albedo=(0.48, 0.34, 0.22),
+                             fallback=lambda: wood("fence_wood", (0.48, 0.34, 0.22)))
+    post = pbr.pbr_material("fence_post", "fence_wood", albedo=(0.36, 0.25, 0.16),
+                            fallback=lambda: wood("fence_post", (0.36, 0.25, 0.16)))
     for fe in w.get("fences", []):
         h = fe.get("height", 1.8)
         for name, (ax, ay), (bx, by) in world_spec.fence_pieces(fe):
@@ -431,7 +534,9 @@ def build_backdrop(w, col, M):
     rng = random.Random(11)
     for b in w.get("backdrop", []):
         (cx, cy), (bw, bd, bh) = b["center"], b["size"]
-        m = C.material(f"facade_{b['name']}", b["color"], 0.85)
+        slot = "brick" if len(b["name"]) % 2 else "siding"
+        m = pbr.pbr_material(f"facade_{b['name']}", slot, albedo=b["color"],
+                             fallback=lambda: C.material(f"facade_{b['name']}", b["color"], 0.85))
         C.box(b["name"], (cx, cy, bh / 2), (bw, bd, bh), m, collection=col)
         gable_roof(f"{b['name']}_roof", cx - bw / 2 - 0.3, cx + bw / 2 + 0.3, cy - bd / 2 - 0.3, cy + bd / 2 + 0.3, bh, 2.0, 0.12,
                    M["roof"], col)
@@ -458,8 +563,12 @@ def build_backdrop(w, col, M):
         for y in (-16.4, -3.0):
             if y == -3.0 and -14 < x < 22:
                 continue
-            C.cylinder("bg_trunk", (x, y, 1.4), 0.18, 2.8, bark, collection=col, verts=10)
             r = rng.uniform(1.6, 2.3)
+            if MDL.available("tree"):
+                p = C.empty(f"bg_tree_{k}_{int(y)}", (x, y, 0), rng.uniform(0, 2 * math.pi), col)
+                MDL.place("tree", (2 * r, 2 * r, 2.8 + r * 1.6), p, col, fit="height", choice=k)
+                continue
+            C.cylinder("bg_trunk", (x, y, 1.4), 0.18, 2.8, bark, collection=col, verts=10)
             C.ellipsoid("bg_canopy", (x, y, 2.8 + r * 0.7), (r, r, r * 0.9), leaf, collection=col, segments=14)
 
 
@@ -499,6 +608,11 @@ def build_cameras(w, col):
 def tune_lighting(w):
     L = w.get("lights", {})
     world = bpy.context.scene.world
+    if world.get("hdri"):  # photo sky from build_room.build_lighting: it carries the sun; only the indoor light
+        world.node_tree.nodes["Background"].inputs["Strength"].default_value = L.get("hdri_strength", 1.0)
+        if "ceiling_light_power" in L:
+            bpy.data.objects["ceiling_light"].data.energy = L["ceiling_light_power"]
+        return
     world.node_tree.nodes["Background"].inputs["Strength"].default_value = L.get("sky_strength", 0.8)
     sky = next(n for n in world.node_tree.nodes if n.type == "TEX_SKY")
     sky.sun_elevation = math.radians(L.get("sun_elevation_deg", 38))
@@ -520,14 +634,21 @@ def build(w):
             m.name = f"room_{m.name}"
     MM = w.get("materials", {})
     M = dict(room_mats)
-    M.update(
-        siding=C.material("siding", MM.get("siding", {}).get("color", (0.74, 0.72, 0.66)), 0.8),
-        roof=stone_material("roof_shingles", MM.get("roof", {}).get("color", (0.22, 0.2, 0.2)), 0.9, scale=12.0),
-        foundation=stone_material("foundation", (0.45, 0.44, 0.42)),
-        grass=grass_material("grass", MM.get("grass", {}).get("color", (0.16, 0.3, 0.09))),
-        asphalt=stone_material("asphalt", MM.get("asphalt", {}).get("color", (0.07, 0.07, 0.075)), 0.75, scale=40.0),
-        concrete=stone_material("concrete", MM.get("concrete", {}).get("color", (0.55, 0.54, 0.51)), 0.8, scale=8.0),
-        curb=stone_material("curb", (0.62, 0.61, 0.58)),
+    col = lambda k, d: MM.get(k, {}).get("color", d)  # noqa: E731
+    M.update(  # photo-scanned materials (configs/assets.json) when downloaded, procedural otherwise
+        siding=pbr.pbr_material("siding", "siding", albedo=col("siding", (0.74, 0.72, 0.66)),
+                                fallback=lambda: C.material("siding", col("siding", (0.74, 0.72, 0.66)), 0.8)),
+        roof=pbr.pbr_material("roof_shingles", "roof_shingles", albedo=col("roof", (0.22, 0.2, 0.2)),
+                              fallback=lambda: stone_material("roof_shingles", col("roof", (0.22, 0.2, 0.2)), 0.9, scale=12.0)),
+        foundation=pbr.pbr_material("foundation", "concrete", albedo=(0.45, 0.44, 0.42),
+                                    fallback=lambda: stone_material("foundation", (0.45, 0.44, 0.42))),
+        grass=pbr.pbr_material("grass", "grass_ground", albedo=col("grass", (0.16, 0.3, 0.09)),
+                               fallback=lambda: grass_material("grass", col("grass", (0.16, 0.3, 0.09)))),
+        asphalt=pbr.pbr_material("asphalt", "asphalt", albedo=col("asphalt", (0.07, 0.07, 0.075)),
+                                 fallback=lambda: stone_material("asphalt", col("asphalt", (0.07, 0.07, 0.075)), 0.75, scale=40.0)),
+        concrete=pbr.pbr_material("concrete", "sidewalk_concrete", albedo=col("concrete", (0.55, 0.54, 0.51)),
+                                  fallback=lambda: stone_material("concrete", col("concrete", (0.55, 0.54, 0.51)), 0.8, scale=8.0)),
+        curb=pbr.pbr_material("curb", "concrete", albedo=(0.62, 0.61, 0.58), fallback=lambda: stone_material("curb", (0.62, 0.61, 0.58))),
         joint=C.material("joint", (0.3, 0.3, 0.29), 0.9),
         paint_white=C.material("paint_white", (0.92, 0.92, 0.9), 0.5),
         paint_yellow=C.material("paint_yellow", (0.9, 0.7, 0.1), 0.5),
@@ -544,6 +665,7 @@ def build(w):
     build_ground(w, street, M)
     build_fences(w, lot, M)
     build_objects(w, objs, M)
+    build_grass(w, lot)
     build_backdrop(w, bg, M)
     build_cameras(w, C.get_collection("lights_cameras"))
     tune_lighting(w)
@@ -552,9 +674,14 @@ def build(w):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", default=os.path.join(C.ROOT, "configs", "world.json"))
-    ap.add_argument("--out", default=C.ASSETS)
+    ap.add_argument("--out", help="output folder (default: assets/photoreal for photo builds, assets otherwise)")
+    ap.add_argument("--realism", choices=["auto", "photo", "procedural"], default="auto",
+                    help="photo: CC0 photo-scanned materials, models and HDRI sky (scripts/fetch_assets.py); "
+                         "procedural: the original look; auto: photo when the assets are downloaded")
     ap.add_argument("--no-glb", action="store_true")
     a = ap.parse_args(C.script_args())
+    a.out = a.out or pbr.configure(a.realism)
+    pbr.configure(a.realism)
     w = world_spec.load_world(a.spec)
     os.makedirs(a.out, exist_ok=True)
     C.clear_scene()

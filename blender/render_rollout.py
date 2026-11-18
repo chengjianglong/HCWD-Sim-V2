@@ -102,6 +102,8 @@ def main():
     ap.add_argument("--still", type=int, help="render only this frame to PNG")
     ap.add_argument("--no-goals", action="store_true")
     ap.add_argument("--humans", choices=["rocketbox", "mannequin"])
+    ap.add_argument("--realism", choices=["auto", "photo", "procedural"], default="auto",
+                    help="scene to render: the photo-asset build (assets/photoreal) when it exists, or the procedural one")
     ap.add_argument("--avatars", nargs="*", help="Rocketbox avatar names (default: all downloaded, in order)")
     a = ap.parse_args(C.script_args())
     data = {}
@@ -118,7 +120,7 @@ def main():
     out = a.out or os.path.splitext(a.rollout)[0] + f"_{a.camera}.mp4"
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 
-    bpy.ops.wm.open_mainfile(filepath=a.room or os.path.join(C.ASSETS, "world.blend" if world else "room.blend"))
+    bpy.ops.wm.open_mainfile(filepath=a.room or C.scene_blend("world" if world else "room", a.realism))
     scene = bpy.context.scene
     if "bounds" not in data:
         floor = bpy.data.objects["floor"]

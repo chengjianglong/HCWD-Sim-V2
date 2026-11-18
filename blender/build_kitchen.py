@@ -17,6 +17,8 @@ import bpy
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_room as BR  # noqa: E402
 import common as C  # noqa: E402
+import models as MDL  # noqa: E402
+import pbr  # noqa: E402
 from worldsim import room_spec  # noqa: E402
 
 DEFAULT_SPEC = os.path.join(C.ROOT, "configs", "kitchen.json")
@@ -56,21 +58,27 @@ def stone_material(name, color, roughness=0.25):
 def kitchen_materials(spec):
     M = spec.get("materials", {})
     return dict(
-        cabinet=C.material("cabinet", (0.42, 0.5, 0.44), 0.45),
+        cabinet=pbr.pbr_material("cabinet", "cabinet", albedo=(0.42, 0.5, 0.44),
+                                 fallback=lambda: C.material("cabinet", (0.42, 0.5, 0.44), 0.45)),
         cabinet_inner=C.material("cabinet_inner", (0.85, 0.84, 0.8), 0.6),
-        worktop=stone_material("worktop", (0.86, 0.85, 0.82)),
-        backsplash=tile_material("backsplash", (0.93, 0.93, 0.9), 0.15, scale=9.0),
+        worktop=pbr.pbr_material("worktop", "worktop_stone", albedo=(0.86, 0.85, 0.82), roughness_scale=0.6,
+                                 fallback=lambda: stone_material("worktop", (0.86, 0.85, 0.82))),
+        backsplash=pbr.pbr_material("backsplash", "backsplash_tile", albedo=(0.93, 0.93, 0.9),
+                                    fallback=lambda: tile_material("backsplash", (0.93, 0.93, 0.9), 0.15, scale=9.0)),
         handle=C.material("handle", (0.75, 0.62, 0.38), 0.25, metallic=1.0),
         steel=C.material("steel", (0.78, 0.78, 0.8), 0.22, metallic=1.0),
         black_glass=C.material("black_glass", (0.01, 0.01, 0.012), 0.05),
         appliance=C.material("appliance", (0.82, 0.82, 0.83), 0.3, metallic=0.7),
         plinth=C.material("plinth", (0.08, 0.08, 0.08), 0.6),
-        wood=C.wood_material("island_wood", (0.45, 0.3, 0.17), 0.45),
+        wood=pbr.pbr_material("island_wood", "wood_light",
+                              fallback=lambda: C.wood_material("island_wood", (0.45, 0.3, 0.17), 0.45)),
         ceramic=C.material("ceramic_white", (0.92, 0.91, 0.88), 0.2),
         terracotta=C.material("terracotta", (0.62, 0.3, 0.18), 0.8),
         leaf=C.material("herb_leaf", (0.12, 0.35, 0.08), 0.7),
-        floor=tile_material("floor", M.get("floor", {}).get("color", (0.62, 0.6, 0.56)),
-                            M.get("floor", {}).get("roughness", 0.35), scale=1.6, mortar=(0.45, 0.44, 0.42)),
+        floor=pbr.pbr_material("floor", "kitchen_floor_tile", albedo=M.get("floor", {}).get("color", (0.62, 0.6, 0.56)),
+                               fallback=lambda: tile_material("floor", M.get("floor", {}).get("color", (0.62, 0.6, 0.56)),
+                                                              M.get("floor", {}).get("roughness", 0.35), scale=1.6,
+                                                              mortar=(0.45, 0.44, 0.42))),
     )
 
 
@@ -270,6 +278,59 @@ def p_pan(pr, col, mats):
 
 PROP_BUILDERS = dict(fruit_bowl=p_fruit_bowl, knife_block=p_knife_block, kettle=p_kettle, utensil_jar=p_utensil_jar,
                      plate_stack=p_plate_stack, herb_pot=p_herb_pot, pan=p_pan)
+# props that become real models when downloaded: slot and the box (w, d, h) the model is fitted into
+PROP_MODELS = dict(fruit_bowl=("fruit_bowl", None), kettle=("kettle", (0.22, 0.2, 0.26)),
+                   herb_pot=("herb_pot", (0.16, 0.16, 0.28)))
+
+
+def build_prop(pr, col, mats):
+    slot, size = PROP_MODELS.get(pr["type"], (None, None))
+    if slot and MDL.available(slot):
+        if size is None:  # the bowl keeps its spec radius (chop.py drops distractor apples into it)
+            r = pr.get("radius", 0.15)
+            size = (2 * r, 2 * r, 0.11)
+        p = C.empty(pr["name"], tuple(pr["at"]), math.radians(pr.get("rot", 0)), col)
+        if MDL.place(slot, size, p, col):
+            return p
+    return PROP_BUILDERS[pr["type"]](pr, col, mats)
+
+
+def clutter_spots(spec, rng, n):
+    """Free spots on worktops away from the task area and the spec's props: [(x, y, z, max_size)]."""
+    T = spec.get("task", {})
+    keep = [tuple(p["at"][:2]) for p in spec.get("props", [])]
+    task_counter = T.get("counter")
+    out, tries = [], 0
+    tops = [f for f in spec.get("furniture", []) if f["type"] in ("counter", "island") and f["name"] != task_counter]
+    while tops and len(out) < n and tries < 400:
+        tries += 1
+        f = tops[int(rng.integers(len(tops)))]
+        w, d, h = f["size"]
+        a = math.radians(f.get("rot", 0))
+        u, v = rng.uniform(-w / 2 + 0.15, w / 2 - 0.15), rng.uniform(-d / 2 + 0.12, d / 2 - 0.12)
+        x = f["center"][0] + u * math.cos(a) - v * math.sin(a)
+        y = f["center"][1] + u * math.sin(a) + v * math.cos(a)
+        if all(math.hypot(x - kx, y - ky) > 0.28 for kx, ky in keep + [(o[0], o[1]) for o in out]):
+            top = h + (0.02 if f["type"] == "island" else 0.0)
+            out.append((x, y, top, 0.22))
+    return out
+
+
+def build_clutter(spec, col, seed=0, n=6):
+    """Everyday objects on the free worktop areas (real kitchens are never empty). Re-sampled per ego episode."""
+    if not MDL.available("clutter"):
+        return []
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n_ids = len(MDL.ids("clutter"))
+    out = []
+    for k, (x, y, z, s) in enumerate(clutter_spots(spec, rng, n)):
+        p = C.empty(f"clutter_{k}", (x, y, z), float(rng.uniform(0, 2 * math.pi)), col)
+        p["clutter"] = True
+        sz = float(rng.uniform(0.6, 1.0)) * s
+        if MDL.place("clutter", (sz, sz, sz * 1.4), p, col, choice=int(rng.integers(n_ids))):
+            out.append(p)
+    return out
 
 
 # ------------------------------------------------------------------ cameras
@@ -293,9 +354,13 @@ def build_cameras(spec, col):
 # ------------------------------------------------------------------ main
 def build_materials(spec):
     M = spec.get("materials", {})
+    wc = M.get("walls", {}).get("color", (0.9, 0.88, 0.84))
+    cc = M.get("ceiling", {}).get("color", (0.94, 0.94, 0.93))
     mats = dict(
-        walls=C.material("walls", M.get("walls", {}).get("color", (0.9, 0.88, 0.84)), M.get("walls", {}).get("roughness", 0.9)),
-        ceiling=C.material("ceiling", M.get("ceiling", {}).get("color", (0.94, 0.94, 0.93)), 0.95),
+        walls=pbr.pbr_material("walls", "wall_plaster", albedo=wc, normal_strength=0.4,
+                               fallback=lambda: C.material("walls", wc, M.get("walls", {}).get("roughness", 0.9))),
+        ceiling=pbr.pbr_material("ceiling", "ceiling_paint", albedo=cc, normal_strength=0.2,
+                                 fallback=lambda: C.material("ceiling", cc, 0.95)),
         trim=C.material("trim", (0.95, 0.95, 0.94), 0.4),
         door=C.material("door", (0.92, 0.91, 0.88), 0.45),
         glass=C.material("glass", (0.9, 0.95, 1.0), 0.02, transmission=1.0),
@@ -320,19 +385,17 @@ def build_interior(spec, mats, skip_walls=()):
     C.box("ceiling", ((cx0 + cx1) / 2, (cy0 + cy1) / 2, H + 0.01), (cx1 - cx0, cy1 - cy0, 0.02), mats["ceiling"], collection=shell)
     BR.build_walls(spec, shell, mats, skip=skip_walls)
     BR.build_openings(spec, shell, mats)
-    # build_room's builders take (f, parent, mat, mats); kitchen ones ignore `mat` and use the shared mats
-    for f in spec.get("furniture", []):
-        parent = C.empty(f["name"], (f["center"][0], f["center"][1], 0.0), math.radians(f.get("rot", 0.0)), furn)
-        BR.BUILDERS.get(f["type"], BR.f_generic)(f, parent, BR.furniture_material(f), mats)
-        for ch in parent.children_recursive:
-            if furn not in ch.users_collection:
-                C._move_to(ch, furn)
+    # build_room's builders take (f, parent, mat, mats); kitchen ones ignore `mat` and use the shared mats.
+    # Stools become real models when downloaded (build_room.MODEL_SLOTS); cabinets, sink, stove stay procedural
+    # because they must fill the spec's runs exactly.
+    BR.build_furniture(spec, furn, mats, builders=BR.BUILDERS)
     for pr in spec.get("props", []):
         before = set(bpy.data.objects)
-        PROP_BUILDERS[pr["type"]](pr, props, mats)
+        build_prop(pr, props, mats)
         for o in set(bpy.data.objects) - before:
-            if props not in o.users_collection:
+            if props not in o.users_collection and o.users_collection and o.users_collection[0].name != MDL.LIB:
                 C._move_to(o, props)
+    build_clutter(spec, props)
 
 
 def ceiling_light(spec, col, name="kitchen_light"):
@@ -363,8 +426,13 @@ def build(spec):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", default=DEFAULT_SPEC)
-    ap.add_argument("--out", default=C.ASSETS)
+    ap.add_argument("--out", help="output folder (default: assets/photoreal for photo builds, assets otherwise)")
+    ap.add_argument("--realism", choices=["auto", "photo", "procedural"], default="auto",
+                    help="photo: CC0 photo-scanned materials, models and HDRI sky (scripts/fetch_assets.py); "
+                         "procedural: the original look; auto: photo when the assets are downloaded")
     a = ap.parse_args(C.script_args())
+    a.out = a.out or pbr.configure(a.realism)
+    pbr.configure(a.realism)
     spec = room_spec.load_spec(a.spec)
     os.makedirs(a.out, exist_ok=True)
     C.clear_scene()

@@ -79,12 +79,13 @@ evaluate.py ─► renders/*.npz (humans + cars, + .bvh) ─► blender/render_r
 ```bash
 ./scripts/install_blender.sh                              # portable Blender 4.2 LTS -> tools/blender
 python3 scripts/fetch_rocketbox.py                         # photo-realistic avatars + mocap (~540 MB, MIT)
-tools/blender/blender -b -P blender/build_kitchen.py       # assets/kitchen.blend (ego kitchen, optional)
-tools/blender/blender -b -P blender/build_world.py         # assets/world.blend, world.glb, world_layout.json
-tools/blender/blender -b -P blender/build_room.py          # assets/room.blend, room.glb, room_layout.json
+python3 scripts/fetch_assets.py                            # photo-scanned textures, models, HDRI skies (~1.8 GB, CC0)
+tools/blender/blender -b -P blender/build_kitchen.py       # ego kitchen (optional)
+tools/blender/blender -b -P blender/build_world.py         # house + garden + street (+ world_layout.json)
+tools/blender/blender -b -P blender/build_room.py          # living room (+ room_layout.json)
 tools/blender/blender -b -P blender/build_human.py         # assets/human.blend (simple mannequin rig, optional)
 
-.venv/bin/python -m pytest -q tests                       # 27 tests (room + world + ego)
+.venv/bin/python -m pytest -q tests                       # 35 tests (room + world + ego + realism)
 
 # World: house + garden + street with traffic
 .venv/bin/python train.py --config configs/world.yaml --smoke --generations 2   # ~1 min check on both GPUs
@@ -99,6 +100,10 @@ tools/blender/blender -b -P blender/render_rollout.py -- --rollout renders/world
 .venv/bin/python evaluate.py --ckpt runs/main/best.pt --agents 4 --out renders/rollout.npz --bvh
 tools/blender/blender -b -P blender/render_rollout.py -- --rollout renders/rollout.npz --camera corner
 ```
+With the downloaded assets the builders write photo-real scenes to `assets/photoreal/` (not in git), and the
+renderers use them automatically. Without them, or with `--realism procedural`, they write the procedural scenes
+that ship in `assets/` (see [Photo-realism and sim-to-real](#photo-realism-and-sim-to-real)).
+
 `evaluate.py` prints a benchmark, then writes a rollout. It uses the spec and traffic level the checkpoint
 was trained with unless you pass `--spec`, `--agents` or `--cars`.
 
@@ -110,6 +115,7 @@ was trained with unless you pass `--spec`, `--agents` or `--cars`.
 - `--engine cycles|eevee`: Cycles is the default for Rocketbox humans; EEVEE is a fast preview.
 - `--res 1920x1080`, `--samples 32`, `--frames 300`, `--still 120` (one PNG frame).
 - `--humans rocketbox|mannequin` and `--avatars Female_Adult_01 Male_Adult_05 ...`: Rocketbox is used if it has been downloaded.
+- `--realism auto|photo|procedural`: which scene build to render (default: the photo-real one when it exists).
 
 Each render also saves an animated `.blend` next to the video, so you can open it in Blender and scrub the timeline.
 
@@ -193,6 +199,72 @@ Options for `gen_ego_episodes.py`:
 - `--no-render` writes the poses only, and `--keep-blend` saves the animated scene.
 
 Each episode records the maximum wrist-to-target error of its IK; over a 20-episode batch it was 1.6–4.4 cm (median 3.0 cm).
+
+## Photo-realism and sim-to-real
+The point of simulated data is to train models that work on real cameras, so the scenes and the cameras that film
+them are made as close to real ones as we can, and the remaining gap is measured.
+
+<p align="center">
+  <img src="docs/media/photoreal_world.jpg" width="860" alt="Before and after: the procedural world vs photo-scanned materials, real trees, grass and street furniture under an HDRI sky">
+  <br><sub>The same world, cameras and Cycles settings, before and after: procedural (left) vs photo-scanned
+  materials, real models and an HDRI sky (right). Colliders, routes and checkpoints are unchanged.</sub>
+</p>
+<p align="center">
+  <img src="docs/media/photoreal_ego.jpg" width="860" alt="One egocentric episode three ways: procedural, photo-real render, and photo-real with the simulated camera sensor">
+  <br><sub>One egocentric episode (same seed, identical hand motion) three ways: the procedural kitchen, the
+  photo-real render (Cycles, randomised textures, HDRI and clutter), and the same frames through the simulated
+  camera (lens distortion, vignetting, exposure and white balance, noise, compression).</sub>
+</p>
+
+**Photo-scanned assets** (`configs/assets.json`, all CC0 from [Poly Haven](https://polyhaven.com)):
+`python3 scripts/fetch_assets.py` downloads about 1.8 GB into `assets/polyhaven/` (not in git). With the assets
+present, the three builders use them and write to `assets/photoreal/`. The procedural scenes in `assets/` stay as
+the offline fallback (`--realism procedural`).
+- **Materials** (`blender/pbr.py`): scanned colour, roughness, normal and AO maps for walls, ceilings, wood and
+  tiled floors, cabinets, worktops, the backsplash, fabrics, rugs, lawn, soil, asphalt, pavements, pavers, siding,
+  brick, roof tiles and fences.
+  - Projection: they are box-projected in world space at the scan's real-world size, so they need no UVs and keep
+    true scale.
+  - Colour: each material is matched to the spec colour (its *albedo*). The photo keeps its detail, but its average
+    colour is the one in `room.json` / `kitchen.json` / `world.json`, or the one the egocentric generator draws.
+- **Models** (`blender/models.py`): real furniture and plants are fitted *inside* each JSON box, so the colliders,
+  routes and checkpoints don't change.
+  - Indoors: sofa, coffee and dining tables, chairs, bookshelf, potted plants, bar stools, kettle, fruit bowl, herb pot.
+  - Outdoors: trees, shrubs, the bench, the patio table, street lamps, bins and the AC unit.
+  - Scattered with geometry nodes: about 9,000 grass clumps on the lawn, and flowers and vegetables in the beds.
+  - Clutter: 3–8 everyday objects (vases, pots, books, a clock, bananas, ...) on the free worktops.
+- **Light**: an HDRI sky (sunny or overcast gardens) lights the scene through the windows, sun included. Cycles
+  path-traces it; EEVEE extracts the sun from it for shadows.
+- **Rendering** (`gen_ego_episodes.py --engine cycles`, the default in `gen_ego_data.sh`): adaptive sampling,
+  denoising, indirect clamping, and 0.5-shutter motion blur as a real exposure has. A 78-frame, 7-view episode at
+  256 px and 32 samples took 25 min on a shared RTX A2000 (EEVEE: a few minutes), so EEVEE (`ENGINE=eevee`) remains
+  the fast option and still gets the photo assets.
+
+**Domain randomisation** (per episode, recorded under `domain` in `episode.json`):
+- the texture variant of the cabinets, worktop, backsplash, floor and walls, on top of the colour palette;
+- the HDRI sky, its rotation and strength;
+- the clutter: which objects, how many, and where.
+
+It uses its own random stream, so a given seed still produces exactly the same hand motion as the procedural pipeline.
+
+**Simulated cameras** (`worldsim/sensor.py`, applied by both exporters; `--sensor none` gives the clean renders):
+- Each episode is filmed by its own simulated device per view (head glasses, chest, wrist and scene cameras each
+  have a profile). The device adds:
+  - lens distortion (OpenCV Brown–Conrady), vignetting;
+  - exposure and white-balance error;
+  - shot and read noise in linear light, lateral chromatic aberration;
+  - JPEG compression (LeRobot videos are H.264 as well).
+- Geometry stays exact: the exported intrinsics are the distorted camera's (K plus `dist` k1, k2, p1, p2, k3), stored
+  per episode in `meta/episodes.jsonl` (LeRobot) or `meta.json` `sensors` (vla-qwen). A test checks that a point
+  lands where `cv2.projectPoints` would put it.
+
+**Measuring the gap** (`scripts/sim2real_metric.py`): KID and FID on Inception-v3 features between rendered frames and
+a folder of real frames. Use, for example, a few thousand frames sampled from EPIC-KITCHENS or Ego4D, downloaded
+under their licences. Run it on the procedural and the photo-real datasets to see how much closer each step gets:
+```bash
+.venv/bin/python scripts/sim2real_metric.py --real data/real/epic_frames --views head \
+    --sim procedural=data/ego_raw photoreal=data/ego_photo --sensor realistic --out gap.json
+```
 
 ## The world (`configs/world.json`)
 The world wraps the room in its surroundings. Coordinates continue from the room's: the origin
@@ -355,19 +427,24 @@ spinning wheels), keyed from the rollout's car trajectories.
 
 ## Layout
 ```
-configs/   room.json (the room), world.json (house + garden + street), kitchen.json (the kitchen: ego scene and the house annex), default.yaml (room training), world.yaml (world training)
+configs/   room.json (the room), world.json (house + garden + street), kitchen.json (the kitchen: ego scene and the house annex), default.yaml (room training), world.yaml (world training),
+           assets.json (photo-scanned textures, models and HDRIs per slot)
 blender/   build_room.py, build_world.py, build_kitchen.py, build_human.py, rocketbox.py, cars.py, render_rollout.py, common.py
-           chop.py (chopping task + arm IK), ego_rig.py (camera rig), gen_ego_episodes.py (ego data generator)
+           chop.py (chopping task + arm IK), ego_rig.py (camera rig), gen_ego_episodes.py (ego data generator),
+           pbr.py (photo materials, HDRI sky), models.py (real models fitted in the JSON boxes, scattering)
 worldsim/  room_spec, world_spec, layout, nav, traffic, sensors, env, gait, skeleton, policy, ppo, pbt, selfplay, distill, export,
-           ego (egocentric state/action maths)
+           ego (egocentric state/action maths), sensor (simulated real cameras)
 tests/     test_room.py (room, PPO, PBT, export), test_world.py (routes, crossing, traffic, car hits, world export),
-           test_ego.py (kitchen spec, ego state/actions, LeRobot and vla-qwen exports)
+           test_ego.py (kitchen spec, ego state/actions, LeRobot and vla-qwen exports),
+           test_realism.py (asset manifest, camera sensor geometry, gap metric)
 scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), make_demo_video.py (demo.mp4), plot_training.py,
-           gen_ego_data.sh, ego_to_lerobot.py, ego_to_vlaqwen.py, ego_preview.py
+           gen_ego_data.sh, ego_to_lerobot.py, ego_to_vlaqwen.py, ego_preview.py,
+           fetch_assets.py (CC0 photo assets), sim2real_metric.py (KID/FID against real frames)
 docs/media/  demo.mp4 (project demo) and its thumbnail, demo GIFs, MP4s, stills and training curves shown in this README
 train.py   evaluate.py
 ```
-Not in git (see `.gitignore`): `tools/` (Blender), `.venv/`, `runs/` (checkpoints), `renders/`, `data/` (generated datasets), and `assets/rocketbox/`.
+Not in git (see `.gitignore`): `tools/` (Blender), `.venv/`, `runs/` (checkpoints), `renders/`, `data/` (generated datasets),
+`assets/rocketbox/`, `assets/polyhaven/` (downloaded CC0 assets) and `assets/photoreal/` (photo-real scene builds).
 Re-create these with the quick-start commands.
 
 ## Notes

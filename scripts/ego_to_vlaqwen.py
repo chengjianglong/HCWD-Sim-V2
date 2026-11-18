@@ -21,11 +21,13 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from worldsim import ego  # noqa: E402
+from worldsim import ego, sensor  # noqa: E402
 
 
-def load(path, res):
+def load(path, res, cam=None):
     im = Image.open(path).convert("RGB")
+    if cam is not None:
+        im = Image.fromarray(cam(np.asarray(im)))
     if im.size != (res, res):
         im = im.resize((res, res), Image.BICUBIC)
     return np.asarray(im, dtype=np.uint8)
@@ -39,6 +41,9 @@ def main():
     ap.add_argument("--res", type=int, default=224)
     ap.add_argument("--ref", choices=["head", "world"], default="head")
     ap.add_argument("--hand", choices=["right", "left"], default="right")
+    ap.add_argument("--sensor", choices=["realistic", "none"], default="realistic",
+                    help="simulated camera per episode and view (worldsim/sensor.py), applied before resizing")
+    ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     eps = ego.load_raw(a.raw)
     if not eps:
@@ -56,15 +61,18 @@ def main():
     state = np.zeros((total, 8), np.float32)
     actions = np.zeros((total, 7), np.float32)
     ep_i, fr_i, tk_i = (np.zeros(total, np.int64) for _ in range(3))
-    tasks = {}
+    tasks, sensors = {}, []
     for ei, ((d, m), st, n) in enumerate(zip(eps, starts, lengths)):
         ti = tasks.setdefault(m["instruction"], len(tasks))
         s, act = ego.hand_state_actions(m, a.hand, a.ref)
         state[st:st + n], actions[st:st + n] = s, act
         ep_i[st:st + n], fr_i[st:st + n], tk_i[st:st + n] = ei, np.arange(n), ti
+        cams = [sensor.CameraSensor(v, m["intrinsics"][v], sensor.seed_for(a.seed, os.path.basename(d), v), a.sensor)
+                if a.sensor == "realistic" else None for v in a.views]
+        sensors.append({v: dict(c.describe(), intrinsics=c.intrinsics()) for v, c in zip(a.views, cams) if c})
         for i in range(n):
             for k, v in enumerate(a.views):
-                mm[st + i, k] = load(os.path.join(d, v, f"{i:06d}.png"), a.res)
+                mm[st + i, k] = load(os.path.join(d, v, f"{i:06d}.png"), a.res, cams[k])
         print(f"[vla-qwen] {ei + 1}/{len(eps)} {os.path.basename(d)}: {n} frames", flush=True)
     mm.flush()
     del mm
@@ -80,7 +88,9 @@ def main():
         "tasks": {int(i): t for t, i in tasks.items()},
         "episode_starts": starts, "episode_lengths": lengths,
         "stats": {"state": stats(state), "actions": stats(actions)},
-        "source": {"generator": "human-centric-world-simulation ego kitchen", "views": a.views, "ref": a.ref, "hand": a.hand},
+        "source": {"generator": "human-centric-world-simulation ego kitchen", "views": a.views, "ref": a.ref, "hand": a.hand,
+                   "sensor": a.sensor},
+        "sensors": sensors,  # per episode: the simulated camera of each view (native-resolution intrinsics)
     }
     with open(os.path.join(a.out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
