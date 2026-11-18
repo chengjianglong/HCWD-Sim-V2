@@ -1,8 +1,9 @@
-.venv/
-tools/
+.venv
+tools
 runs/
 renders/
 __pycache__/
 *.blend1
-assets/rocketbox/
+assets/rocketbox
 .claude/
+data/

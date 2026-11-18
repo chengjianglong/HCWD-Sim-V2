@@ -1,0 +1,56 @@
+{
+  "_doc": "Kitchen for the egocentric chopping task. Same schema as room.json (origin = inside south-west corner, x along the south wall, y into the room, rot 0 = front faces south/-y). Furniture z0 lifts wall-hung pieces. `task` places the cook, board, knife and apple; blender/gen_ego_episodes.py randomises inside these ranges.",
+  "name": "kitchen",
+  "width": 4.4,
+  "depth": 3.6,
+  "height": 2.6,
+  "wall_thickness": 0.15,
+  "materials": {
+    "floor": {"type": "tile", "color": [0.62, 0.6, 0.56], "roughness": 0.35},
+    "walls": {"color": [0.9, 0.88, 0.84], "roughness": 0.9},
+    "ceiling": {"color": [0.94, 0.94, 0.93]}
+  },
+  "openings": [
+    {"name": "door", "type": "door", "wall": "south", "offset": 3.2, "width": 0.9, "height": 2.05, "sill": 0.0, "open": "in", "hinge": "right"},
+    {"name": "window_sink", "type": "window", "wall": "north", "offset": 0.45, "width": 1.0, "height": 1.0, "sill": 1.1},
+    {"name": "window_e", "type": "window", "wall": "east", "offset": 1.0, "width": 1.2, "height": 1.2, "sill": 0.95}
+  ],
+  "furniture": [
+    {"name": "counter_n", "type": "counter", "center": [1.95, 3.29], "size": [2.3, 0.62, 0.9], "rot": 0, "doors": 4},
+    {"name": "sink_n", "type": "sink", "center": [0.4, 3.29], "size": [0.8, 0.62, 0.9], "rot": 0},
+    {"name": "fridge", "type": "fridge", "center": [3.75, 3.24], "size": [0.8, 0.72, 1.85], "rot": 0},
+    {"name": "counter_w", "type": "counter", "center": [0.31, 2.48], "size": [1.0, 0.62, 0.9], "rot": 90, "doors": 2},
+    {"name": "stove", "type": "stove", "center": [0.31, 1.6], "size": [0.76, 0.62, 0.9], "rot": 90},
+    {"name": "counter_w2", "type": "counter", "center": [0.31, 0.86], "size": [0.72, 0.62, 0.9], "rot": 90, "doors": 1},
+    {"name": "uppers_n", "type": "upper_cabinet", "center": [2.35, 3.425], "size": [1.7, 0.35, 0.72], "rot": 0, "z0": 1.45, "doors": 4},
+    {"name": "uppers_w", "type": "upper_cabinet", "center": [0.175, 2.48], "size": [1.0, 0.35, 0.72], "rot": 90, "z0": 1.45, "doors": 2},
+    {"name": "hood", "type": "range_hood", "center": [0.24, 1.6], "size": [0.76, 0.48, 0.5], "rot": 90, "z0": 1.6},
+    {"name": "island", "type": "island", "center": [2.25, 1.35], "size": [1.6, 0.85, 0.92], "rot": 0},
+    {"name": "stool_a", "type": "stool", "center": [1.85, 0.62], "size": [0.38, 0.38, 0.66], "rot": 0},
+    {"name": "stool_b", "type": "stool", "center": [2.65, 0.62], "size": [0.38, 0.38, 0.66], "rot": 0},
+    {"name": "mat", "type": "rug", "center": [2.1, 2.62], "size": [1.4, 0.5, 0.01], "rot": 0, "collide": false, "color": [0.3, 0.33, 0.38]}
+  ],
+  "props": [
+    {"name": "fruit_bowl", "type": "fruit_bowl", "at": [2.2, 1.35, 0.92], "radius": 0.15},
+    {"name": "knife_block", "type": "knife_block", "at": [1.08, 3.42, 0.9], "rot": 0},
+    {"name": "kettle", "type": "kettle", "at": [0.3, 2.85, 0.9]},
+    {"name": "utensils", "type": "utensil_jar", "at": [0.25, 1.15, 0.9]},
+    {"name": "plates", "type": "plate_stack", "at": [2.75, 1.45, 0.92]},
+    {"name": "herb_pot", "type": "herb_pot", "at": [1.3, 3.47, 0.9]},
+    {"name": "pan", "type": "pan", "at": [0.31, 1.42, 0.92]}
+  ],
+  "task": {
+    "_doc": "Cook stands at counter_n facing north. x ranges are where her root may go; board/knife/apple are in her frame (x = her right, y = forward, z = up from the worktop); she faces north, so it is the world frame shifted to her root. knife yaw_deg 0 = tip pointing forward.",
+    "counter": "counter_n",
+    "worktop_z": 0.9,
+    "cook_x": [1.6, 2.7],
+    "cook_back": 0.22,
+    "board": {"size": [0.38, 0.26, 0.022], "at": [-0.03, 0.40], "jitter": [0.04, 0.03, 8.0]},
+    "knife": {"blade": 0.2, "handle": 0.12, "at": [0.16, 0.37], "yaw_deg": 8},
+    "apple": {"radius": [0.036, 0.044], "at": [-0.05, 0.41], "colors": {
+      "red": [0.55, 0.04, 0.03], "green": [0.32, 0.55, 0.06], "yellow": [0.85, 0.65, 0.12], "pink": [0.8, 0.22, 0.2]}},
+    "cuts": [3, 6],
+    "chop_hz": [1.1, 1.8]
+  },
+  "lights": {"sun_elevation_deg": 30, "sun_azimuth_deg": 160, "sun_strength": 3.0, "ceiling_light_power": 160.0}
+}

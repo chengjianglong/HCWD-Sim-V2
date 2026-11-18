@@ -49,6 +49,9 @@ There are two modes, each with its own spec and training config:
 | **World** | `configs/world.json` (includes `room.json`) | `configs/world.yaml` | Move between rooms, garden, yard and street: through doors and the garden gate, across the road at the crossing, around traffic |
 | **Room** | `configs/room.json` | `configs/default.yaml` | Walk between furniture inside the living room only |
 
+A third pipeline, the **egocentric kitchen** (`configs/kitchen.json`), produces multi-view first-person manipulation
+data for VLA training rather than walking policies; see [Egocentric kitchen data](#egocentric-kitchen-data-for-vla-training).
+
 ```
 configs/room.json ──┬──────────────────► blender/build_room.py ──► assets/room.blend   (visuals, room mode)
                     │
@@ -67,11 +70,12 @@ evaluate.py ─► renders/*.npz (humans + cars, + .bvh) ─► blender/render_r
 ```bash
 ./scripts/install_blender.sh                              # portable Blender 4.2 LTS -> tools/blender
 python3 scripts/fetch_rocketbox.py                         # photo-realistic avatars + mocap (~540 MB, MIT)
+tools/blender/blender -b -P blender/build_kitchen.py       # assets/kitchen.blend (ego kitchen, optional)
 tools/blender/blender -b -P blender/build_world.py         # assets/world.blend, world.glb, world_layout.json
 tools/blender/blender -b -P blender/build_room.py          # assets/room.blend, room.glb, room_layout.json
 tools/blender/blender -b -P blender/build_human.py         # assets/human.blend (simple mannequin rig, optional)
 
-.venv/bin/python -m pytest -q tests                       # 17 tests (room + world)
+.venv/bin/python -m pytest -q tests                       # 24 tests (room + world + ego)
 
 # World: house + garden + street with traffic
 .venv/bin/python train.py --config configs/world.yaml --smoke --generations 2   # ~1 min check on both GPUs
@@ -98,6 +102,79 @@ was trained with unless you pass `--spec`, `--agents` or `--cars`.
 - `--humans rocketbox|mannequin` and `--avatars Female_Adult_01 Male_Adult_05 ...`: Rocketbox is used if it has been downloaded.
 
 Each render also saves an animated `.blend` next to the video, so you can open it in Blender and scrub the timeline.
+
+## Egocentric kitchen data for VLA training
+<p align="center">
+  <img src="docs/media/ego_views.jpg" width="860" alt="Seven synchronized camera views of a woman chopping an apple: head, chest, both wrists and three scene cameras">
+  <br><sub>One episode, three moments, all seven cameras. Every frame comes with both hands' 6-DoF poses, the grip
+  state and every camera's intrinsics and pose. <a href="docs/media/ego_views.gif">Animated version</a></sub>
+</p>
+
+A woman chops an apple on a cutting board in a procedurally built kitchen, and a body-worn camera rig films it:
+
+- **Scene** (`configs/kitchen.json`, `blender/build_kitchen.py`): L-shaped counters with a sink under the window,
+  a stove and hood, fridge, wall cabinets, an island with stools, and small props. It uses the same schema as `room.json`.
+- **The cook** (`blender/chop.py`):
+  - A Rocketbox woman, with her body from the `f_work_table` mocap clip. Rocketbox has no cutting mocap, so her arms are procedural.
+  - An analytic two-bone IK, solved on top of the mocap, moves each wrist to a target and orients the hand. It is
+    solved from joint positions, because the imported bones' tails aren't the next joint, and it blends in from the mocap pose.
+  - The right-hand target is the knife's grip frame. She reaches for the knife lying on the board, grips it, turns it
+    upright, and chops. Each stroke lifts and drops the blade, then steps sideways by one slice width.
+  - Her left hand holds the apple in a claw grip and steps back after each cut.
+  - The apple is pre-split with `bmesh` into pieces with flesh-coloured cut faces. Each piece tips over when its cut lands.
+  - The head turns toward the work (knife, then the cut line) with small saccades. Wrists never dip into the worktop.
+- **Cameras** (`blender/ego_rig.py`):
+
+  | View | Mount | FOV |
+  |---|---|---|
+  | `head` | glasses, between the eyebrows, pitched down 30° | 110° (`--fisheye` = equisolid fisheye, Cycles) |
+  | `chest` | GoPro-style chest mount | 120° |
+  | `left_wrist`, `right_wrist` | watch position on the back of each wrist, looking along the hand (like a robot's wrist camera) | 100° |
+  | `scene_front`, `scene_left`, `scene_right` | fixed, looking at the board | 60–70° |
+
+  The bone axes from the FBX import are arbitrary, so the head and chest frames are calibrated in the rest pose
+  (facing = the head→nose direction), and the wrist frames come from the elbow→wrist direction. Each body mount also
+  gets a small random offset per episode (about 6 mm and 2°).
+- **Randomised per episode** (`blender/gen_ego_episodes.py`):
+  - One of three women, plus the mocap window.
+  - The apple: colour (red, green, yellow or pink), size and shape.
+  - The task: number of cuts (3–6) and chopping speed (1.1–1.8 Hz).
+  - The setting: where she stands along the counter, board placement, the materials (cabinets, worktop, backsplash,
+    floor and walls), sun and ceiling-light intensity and colour, and 0–3 distractor apples in the fruit bowl.
+  - The instruction, from templates ("slice the green apple on the cutting board", "cut the red apple into 5 pieces", ...).
+- **States and actions** (`worldsim/ego.py`), in the same layout as LIBERO, so LIBERO-pretrained policies line up:
+  - `state` [8]: wrist position, wrist axis-angle, finger widths.
+  - `action` [7]: Δposition, Δaxis-angle, gripper ±1.
+  - By default the poses are in the **head-camera frame at time t** (`--ref world` for the world frame). Expressing the
+    t→t+1 deltas in the frame at t means head motion isn't counted as hand motion.
+  - Both-hands variants: `state.both_hands` [20] and `action.both_hands` [14].
+
+```bash
+tools/blender/blender -b -P blender/build_kitchen.py                         # assets/kitchen.blend
+scripts/gen_ego_data.sh 200 2           # 200 episodes on 2 parallel jobs, then both exports (resumable)
+# or step by step:
+tools/blender/blender -b -P blender/gen_ego_episodes.py -- --out data/ego_raw --episodes 10 --start 0 --seed 0
+.venv/bin/python scripts/ego_to_lerobot.py --raw data/ego_raw --out data/ego_lerobot        # LeRobot v2.0, all views
+.venv/bin/python scripts/ego_to_vlaqwen.py --raw data/ego_raw --out data/ego_vlaqwen --views head right_wrist
+.venv/bin/python scripts/ego_preview.py --raw data/ego_raw --episodes 0 1 --sheet preview.jpg --gif preview.gif
+```
+
+**Outputs:**
+- **Raw episodes** (`data/ego_raw/episode_NNNNNN/`): one PNG folder per camera, plus `episode.json`. The JSON holds
+  the instruction, the per-frame hand, knife and camera poses (OpenCV cam-to-world), the grip, the phase label, and the
+  intrinsics.
+- **LeRobot v2.0** (`data/ego_lerobot`): parquet files, one h264 mp4 per camera per episode, per-frame extrinsics,
+  phase and cut count, and `meta/{info,episodes,tasks,stats,cameras}`.
+- **vla-qwen format** (`data/ego_vlaqwen`): `images.u8` [N, 2, 224, 224, 3], `arrays.npz` and `meta.json`, the same
+  files vla-qwen's `prepare_data.py` writes for LIBERO. vla-qwen's `LiberoDataset` loads it unchanged with
+  `train.py --data`. Any two views can be chosen with `--views`.
+
+Options for `gen_ego_episodes.py`:
+- `--res 256` (square), `--fps 10`, `--engine eevee|cycles`, `--samples 8`, `--fisheye` (Cycles).
+- `--views ...` renders a subset of the cameras.
+- `--no-render` writes the poses only, and `--keep-blend` saves the animated scene.
+
+Each episode records the maximum wrist-to-target error of its IK; over a 20-episode batch it was 1.6–4.4 cm (median 3.0 cm).
 
 ## The world (`configs/world.json`)
 The world wraps the room in its surroundings. Coordinates continue from the room's: the origin
@@ -242,15 +319,19 @@ spinning wheels), keyed from the rollout's car trajectories.
 
 ## Layout
 ```
-configs/   room.json (the room), world.json (house + garden + street), default.yaml (room training), world.yaml (world training)
-blender/   build_room.py, build_world.py, build_human.py, rocketbox.py, cars.py, render_rollout.py, common.py
-worldsim/  room_spec, world_spec, layout, nav, traffic, sensors, env, gait, skeleton, policy, ppo, pbt, selfplay, distill, export
-tests/     test_room.py (room, PPO, PBT, export), test_world.py (routes, crossing, traffic, car hits, world export)
-scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), make_demo_video.py (demo.mp4), plot_training.py
+configs/   room.json (the room), world.json (house + garden + street), kitchen.json (ego kitchen), default.yaml (room training), world.yaml (world training)
+blender/   build_room.py, build_world.py, build_kitchen.py, build_human.py, rocketbox.py, cars.py, render_rollout.py, common.py
+           chop.py (chopping task + arm IK), ego_rig.py (camera rig), gen_ego_episodes.py (ego data generator)
+worldsim/  room_spec, world_spec, layout, nav, traffic, sensors, env, gait, skeleton, policy, ppo, pbt, selfplay, distill, export,
+           ego (egocentric state/action maths)
+tests/     test_room.py (room, PPO, PBT, export), test_world.py (routes, crossing, traffic, car hits, world export),
+           test_ego.py (kitchen spec, ego state/actions, LeRobot and vla-qwen exports)
+scripts/   install_blender.sh, fetch_rocketbox.py, make_demo_media.sh (README media), make_demo_video.py (demo.mp4), plot_training.py,
+           gen_ego_data.sh, ego_to_lerobot.py, ego_to_vlaqwen.py, ego_preview.py
 docs/media/  demo.mp4 (project demo), demo GIFs, MP4s, stills and training curves shown in this README
 train.py   evaluate.py
 ```
-Not in git (see `.gitignore`): `tools/` (Blender), `.venv/`, `runs/` (checkpoints), `renders/`, and `assets/rocketbox/`.
+Not in git (see `.gitignore`): `tools/` (Blender), `.venv/`, `runs/` (checkpoints), `renders/`, `data/` (generated datasets), and `assets/rocketbox/`.
 Re-create these with the quick-start commands.
 
 ## Notes

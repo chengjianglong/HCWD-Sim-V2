@@ -1,0 +1,248 @@
+{
+  "kind": "kitchen",
+  "name": "kitchen",
+  "width": 4.4,
+  "depth": 3.6,
+  "height": 2.6,
+  "bounds": [
+    0.0,
+    0.0,
+    4.4,
+    3.6
+  ],
+  "colliders": [
+    {
+      "name": "door_leaf",
+      "cx": 4.030000000000001,
+      "cy": 0.40000000000000036,
+      "hx": 0.02,
+      "hy": 0.40000000000000036,
+      "theta": 0.0,
+      "height": 1.9999999999999998,
+      "length": 0.8000000000000007,
+      "hinge_u": 4.030000000000001,
+      "inward": true
+    },
+    {
+      "name": "counter_n",
+      "cx": 1.95,
+      "cy": 3.29,
+      "hx": 1.15,
+      "hy": 0.31,
+      "theta": 0.0,
+      "height": 0.9
+    },
+    {
+      "name": "sink_n",
+      "cx": 0.4,
+      "cy": 3.29,
+      "hx": 0.4,
+      "hy": 0.31,
+      "theta": 0.0,
+      "height": 0.9
+    },
+    {
+      "name": "fridge",
+      "cx": 3.75,
+      "cy": 3.24,
+      "hx": 0.4,
+      "hy": 0.36,
+      "theta": 0.0,
+      "height": 1.85
+    },
+    {
+      "name": "counter_w",
+      "cx": 0.31,
+      "cy": 2.48,
+      "hx": 0.5,
+      "hy": 0.31,
+      "theta": 1.5707963267948966,
+      "height": 0.9
+    },
+    {
+      "name": "stove",
+      "cx": 0.31,
+      "cy": 1.6,
+      "hx": 0.38,
+      "hy": 0.31,
+      "theta": 1.5707963267948966,
+      "height": 0.9
+    },
+    {
+      "name": "counter_w2",
+      "cx": 0.31,
+      "cy": 0.86,
+      "hx": 0.36,
+      "hy": 0.31,
+      "theta": 1.5707963267948966,
+      "height": 0.9
+    },
+    {
+      "name": "uppers_n",
+      "cx": 2.35,
+      "cy": 3.425,
+      "hx": 0.85,
+      "hy": 0.175,
+      "theta": 0.0,
+      "height": 0.72
+    },
+    {
+      "name": "uppers_w",
+      "cx": 0.175,
+      "cy": 2.48,
+      "hx": 0.5,
+      "hy": 0.175,
+      "theta": 1.5707963267948966,
+      "height": 0.72
+    },
+    {
+      "name": "hood",
+      "cx": 0.24,
+      "cy": 1.6,
+      "hx": 0.38,
+      "hy": 0.24,
+      "theta": 1.5707963267948966,
+      "height": 0.5
+    },
+    {
+      "name": "island",
+      "cx": 2.25,
+      "cy": 1.35,
+      "hx": 0.8,
+      "hy": 0.425,
+      "theta": 0.0,
+      "height": 0.92
+    },
+    {
+      "name": "stool_a",
+      "cx": 1.85,
+      "cy": 0.62,
+      "hx": 0.19,
+      "hy": 0.19,
+      "theta": 0.0,
+      "height": 0.66
+    },
+    {
+      "name": "stool_b",
+      "cx": 2.65,
+      "cy": 0.62,
+      "hx": 0.19,
+      "hy": 0.19,
+      "theta": 0.0,
+      "height": 0.66
+    }
+  ],
+  "pois": [
+    {
+      "name": "door",
+      "x": 3.6500000000000004,
+      "y": 0.6
+    }
+  ],
+  "openings": [
+    {
+      "name": "door",
+      "type": "door",
+      "wall": "south",
+      "offset": 3.2,
+      "width": 0.9,
+      "height": 2.05,
+      "sill": 0.0,
+      "open": "in",
+      "hinge": "right"
+    },
+    {
+      "name": "window_sink",
+      "type": "window",
+      "wall": "north",
+      "offset": 0.45,
+      "width": 1.0,
+      "height": 1.0,
+      "sill": 1.1
+    },
+    {
+      "name": "window_e",
+      "type": "window",
+      "wall": "east",
+      "offset": 1.0,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.95
+    }
+  ],
+  "task": {
+    "_doc": "Cook stands at counter_n facing north. x ranges are where her root may go; board/knife/apple are in her frame (x = her right, y = forward, z = up from the worktop); she faces north, so it is the world frame shifted to her root. knife yaw_deg 0 = tip pointing forward.",
+    "counter": "counter_n",
+    "worktop_z": 0.9,
+    "cook_x": [
+      1.6,
+      2.7
+    ],
+    "cook_back": 0.22,
+    "board": {
+      "size": [
+        0.38,
+        0.26,
+        0.022
+      ],
+      "at": [
+        -0.03,
+        0.4
+      ],
+      "jitter": [
+        0.04,
+        0.03,
+        8.0
+      ]
+    },
+    "knife": {
+      "blade": 0.2,
+      "handle": 0.12,
+      "at": [
+        0.16,
+        0.37
+      ],
+      "yaw_deg": 8
+    },
+    "apple": {
+      "radius": [
+        0.036,
+        0.044
+      ],
+      "at": [
+        -0.05,
+        0.41
+      ],
+      "colors": {
+        "red": [
+          0.55,
+          0.04,
+          0.03
+        ],
+        "green": [
+          0.32,
+          0.55,
+          0.06
+        ],
+        "yellow": [
+          0.85,
+          0.65,
+          0.12
+        ],
+        "pink": [
+          0.8,
+          0.22,
+          0.2
+        ]
+      }
+    },
+    "cuts": [
+      3,
+      6
+    ],
+    "chop_hz": [
+      1.1,
+      1.8
+    ]
+  }
+}

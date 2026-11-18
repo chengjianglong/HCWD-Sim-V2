@@ -24,7 +24,8 @@ DEFAULT_AVATARS = ["Male_Adult_01", "Female_Adult_01", "Male_Adult_05", "Female_
                    "Male_Adult_08", "Female_Adult_06"]
 # in-place idles come from the *_static set; walks (with root motion, made in-place in Blender) from *_xy
 CLIPS = {
-    "static": ["m_idle_neutral_01", "f_idle_neutral_01"],
+    "static": ["m_idle_neutral_01", "f_idle_neutral_01",
+               "f_work_table", "f_work_mid"],  # standing at a worktop: body base for the kitchen chopping task
     "xy": ["m_walk_slow_01", "m_walk_neutral_01", "m_walk_fast_01",
            "f_walk_slow_01", "f_walk_neutral_01", "f_walk_fast_01"],
 }
