@@ -39,7 +39,10 @@ mp4 $TMP/kitchen.mp4 $OUT/world_kitchen_inside.mp4
 $BL -b -P blender/render_rollout.py -- --rollout $TMP/world.npz --camera top --engine eevee --res 1280x720 --still 420 --out $TMP/top.mp4
 "$FF" -v error -y -i $TMP/top_f420.png -q:v 3 $OUT/world_top.jpg
 "$FF" -v error -y -ss 12 -i $TMP/house.mp4 -frames:v 1 -q:v 3 $OUT/world_kitchen.jpg
-gif $TMP/cutaway.mp4 $OUT/world_cutaway.gif 1 10 720
+# hero GIF: 5 s of the whole lot, then a crossfade to the roof-off house view with people in the kitchen
+"$FF" -v error -y -ss 1 -t 5.5 -i $TMP/cutaway.mp4 -ss 5 -t 6 -i $TMP/house.mp4 -filter_complex \
+  "[0:v]fps=12,scale=720:-1:flags=lanczos,setsar=1[a];[1:v]fps=12,scale=720:-1:flags=lanczos,setsar=1[b];[a][b]xfade=transition=fade:duration=0.6:offset=4.9,split[x][y];[x]palettegen=max_colors=160:stats_mode=diff[p];[y][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+  $OUT/world_cutaway.gif
 gif $TMP/house.mp4   $OUT/world_house.gif 5 8 480
 gif $TMP/kitchen.mp4 $OUT/world_kitchen_inside.gif 8 8 480
 gif $TMP/street.mp4  $OUT/world_street.gif 1 8 480

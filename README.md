@@ -5,8 +5,9 @@
        alt="Six photo-realistic digital humans moving through a cut-away house with a kitchen, its garden and a street with traffic">
   <br>
   <sub>Six learned walking policies share a house with a kitchen, a garden and a street with eight cars: they go through
-  the doors and the garden gate, cross at the zebra crossing, and the cars brake for them. Roof cut away; rendered in Blender (EEVEE).
-  <a href="docs/media/world_cutaway.mp4">Full video</a></sub>
+  the doors and the garden gate, cross at the zebra crossing, and the cars brake for them. The view then moves in on the
+  kitchen, where people come through the open door from the living room. Roof cut away; rendered in Blender (EEVEE).
+  Full videos: <a href="docs/media/world_cutaway.mp4">whole lot</a> · <a href="docs/media/world_house.mp4">house and kitchen</a></sub>
 </p>
 
 <p align="center">
