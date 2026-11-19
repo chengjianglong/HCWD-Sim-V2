@@ -6,7 +6,8 @@
   <br>
   <sub>Six learned walking policies share a house with a kitchen, a garden and a street with eight cars: they go through
   the doors and the garden gate, cross at the zebra crossing, and the cars brake for them. The view then moves in on the
-  kitchen, where people come through the open door from the living room. Roof cut away; rendered in Blender (EEVEE).
+  kitchen, where people come through the open door from the living room. Roof cut away; photo-real scene (scanned
+  materials, real trees and grass, HDRI sky) path-traced in Blender Cycles.
   Full videos: <a href="docs/media/world_cutaway.mp4">whole lot</a> · <a href="docs/media/world_house.mp4">house and kitchen</a></sub>
 </p>
 
